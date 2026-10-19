@@ -115,6 +115,18 @@ def _read_evidence(path: Path) -> Mapping[str, object] | None:
     return value if isinstance(value, dict) else None
 
 
+def _has_usage_limit(path: Path) -> bool:
+    marker = b"usage limit"
+    tail = b""
+    with path.open("rb") as stream:
+        while chunk := stream.read(65536):
+            data = tail + chunk.lower()
+            if marker in data:
+                return True
+            tail = data[-(len(marker) - 1) :]
+    return False
+
+
 def launch(
     request: Request,
     workdir: Path,
@@ -184,6 +196,10 @@ def launch(
     missing: list[str] = []
     if timed_out:
         status = "timeout"
+    elif process.returncode != 0 and (
+        _has_usage_limit(stdout_path) or _has_usage_limit(stderr_path)
+    ):
+        status = "usage_limit"
     elif group_lingered:
         status = "process_error"
     elif invalid_problem:

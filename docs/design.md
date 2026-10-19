@@ -60,6 +60,12 @@ are caller-owned calls carrying feedback and previous results. A bounded
 workflow loop controls their allowance. These two budgets must not be
 conflated.
 
+A nonzero exit with `usage limit` anywhere in stdout or stderr, ignoring case,
+is classified as `usage_limit` and is not automatically retried. This takes
+precedence over other completed-process failures; a handled timeout remains
+`timeout`. The structured problem-file protocol also supports `usage_limit`.
+A successful exit is not reclassified based on log text alone.
+
 ## Limits
 
 No exactly-once guarantee covers worker side effects. The caller must make

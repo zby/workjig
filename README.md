@@ -113,8 +113,10 @@ automatic interpretation of those CLI streams.
 and an explicitly acknowledged `interrupted` launch. `RetryPolicy(on=(...),
 backoff_seconds=...)` selects which eligible execution outcomes to retry up
 to `Request.max_launches`. Usage-limit results are not automatically retried.
-Recognition currently comes from the structured problem-file protocol;
-provider quota messages in raw harness logs are not universally classified.
+Recognition comes from the structured problem-file protocol or a nonzero exit
+whose stdout or stderr contains `usage limit` (case-insensitive). A timed-out
+launch remains `timeout`, even if its logs contain that phrase. Other provider
+quota messages in raw harness logs are not universally classified.
 
 An uncertain launch raises `UncertainLaunchError` before new work starts.
 Inspect `run.unresolved_launches()`, establish that the old worker and its

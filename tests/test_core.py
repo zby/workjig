@@ -66,6 +66,63 @@ def test_worker_argv_preserves_literal_braces(tmp_path: Path) -> None:
     assert command[3] == str(prompt)
 
 
+@pytest.mark.parametrize("stream", ["stdout", "stderr"])
+@pytest.mark.parametrize(
+    "message, exit_code, expected",
+    [
+        ("Usage limit reached", 1, "usage_limit"),
+        ("You've hit your usage limit", 7, "usage_limit"),
+        ("Provider: USAGE LIMIT exceeded", 2, "usage_limit"),
+        ("x" * 65532 + "Usage limit reached", 1, "usage_limit"),
+        ("Usage limit reached", 0, "delivered"),
+        ("Provider: rate limit exceeded", 1, "process_error"),
+    ],
+    ids=["claude", "codex", "provider", "chunk-boundary", "success", "other-error"],
+)
+def test_raw_usage_limit_classification_and_resume(
+    tmp_path: Path, stream: str, message: str, exit_code: int, expected: str
+) -> None:
+    script = tmp_path / "worker.py"
+    script.write_text(
+        "import sys\n"
+        "from pathlib import Path\n"
+        "with Path('launches').open('a') as log: log.write('launch\\n')\n"
+        "(Path(sys.argv[3]) / 'result.txt').write_text('candidate')\n"
+        f"sys.{stream}.buffer.write(b'\\xff' + {message.encode()!r})\n"
+        f"sys.exit({exit_code})\n"
+    )
+    request = _request(_worker(script), max_launches=2, retry=RetryPolicy(on=("process_error",)))
+    records = tmp_path / "records"
+    with Run(records, tmp_path) as run:
+        result = run.call(request)
+    count = 2 if expected == "process_error" else 1
+    assert result.status == expected
+    assert len(result.attempts) == count
+    assert result.outputs == ({"result.txt": "candidate"} if expected == "delivered" else {})
+    for attempt in result.attempts:
+        assert attempt.returncode == exit_code
+        assert (Path(attempt.launch_dir) / f"{stream}.log").read_bytes() == (
+            b"\xff" + message.encode()
+        )
+    with Run(records, tmp_path) as run:
+        resumed = run.call(request)
+    assert resumed.status == expected
+    assert len(resumed.attempts) == count
+    assert (tmp_path / "launches").read_text().splitlines() == ["launch"] * count
+
+
+@pytest.mark.parametrize("message", ["", "Usage limit reached"])
+def test_timeout_is_not_classified_as_usage_limit(tmp_path: Path, message: str) -> None:
+    script = tmp_path / "worker.py"
+    script.write_text(f"import time\nprint({message!r}, flush=True)\ntime.sleep(30)\n")
+    with Run(tmp_path / "records", tmp_path) as run:
+        result = run.call(_request(_worker(script), timeout=0.5))
+    assert result.status == "timeout"
+    assert len(result.attempts) == 1
+    assert result.attempts[0].returncode != 0
+    assert (Path(result.attempts[0].launch_dir) / "stdout.log").read_text() == message + "\n"
+
+
 @pytest.mark.parametrize("leader_exits", [False, True])
 def test_process_group_children_are_stopped(tmp_path: Path, leader_exits: bool) -> None:
     script = tmp_path / "worker.py"

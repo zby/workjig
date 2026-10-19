@@ -54,3 +54,19 @@ committed probe script reproduces the checks with a new chosen directory.
 No real quota exhaustion, authentication failure or permission denial was
 induced. Claude's factory remains command-tested and synthetically tested,
 without a real-model support claim from this session.
+
+## Usage-limit classification, 2026-10-19
+
+The repository handoff reports these messages observed in installed harnesses:
+Claude Code: `Usage limit reached`; Codex: `You've hit your usage limit`.
+It reports that Pi passes the provider's error through, without establishing
+a stable Pi-specific phrase. These are inherited observations, not new real
+probes. The handoff supplies no captured exit statuses or raw record locations
+for these messages, so no particular exit code is claimed here.
+
+Workjig now classifies a nonzero exit containing `usage limit` in either raw
+log, ignoring case, as `usage_limit` and does not automatically retry it.
+Timeouts retain their own status; exit-zero logs alone do not trigger this
+classification. This deliberately narrow text rule does not recognize every
+provider's quota error. Deterministic subprocess tests use synthetic messages
+and exits; they do not establish real harness exit behavior or quota exhaustion.
