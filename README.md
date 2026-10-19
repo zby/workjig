@@ -96,13 +96,16 @@ pi = pi_worker(
 Pass one of these as the request's `worker`. Put the run records inside a
 directory the worker can write; the adapter does not widen the sandbox for
 record paths. Pi's project-trust option controls resource loading, not OS
-permissions. A `claude_worker` command factory is also available, but has not
-been exercised with a real model in this implementation session.
+permissions. A `claude_worker` command factory is also available; Claude Code
+2.1.303 passed the bounded file-copy and reuse probe with requested model
+`haiku`, reporting `claude-haiku-5-5` (see the harness evidence).
 
 Codex and Pi have each passed a bounded real file-copy probe and reuse check.
 Their raw event streams remain in each launch's `stdout.log`. The standalone
 `parse_evidence(harness, stdout_text)` helper extracts available session and
 model fields; it does not infer the served model from the requested model.
+For Claude result records, it preserves the reported `modelUsage` mapping as
+`model_usage`, including entries for multiple models when present.
 `Attempt.evidence` is a separate optional worker-file protocol, not an
 automatic interpretation of those CLI streams.
 
@@ -163,4 +166,5 @@ and resume. To run a real, credential-using probe deliberately:
 ```sh
 uv run python examples/smoke_harness.py codex /tmp/my-codex-probe --model gpt-6.1-sol
 uv run python examples/smoke_harness.py pi /tmp/my-pi-probe --model gpt-6.1-sol
+uv run python examples/smoke_harness.py claude /tmp/my-claude-probe --model haiku
 ```

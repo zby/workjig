@@ -7,12 +7,12 @@ import json
 from pathlib import Path
 
 from workjig import Request, Run
-from workjig.adapters import codex_worker, parse_evidence, pi_worker
+from workjig.adapters import claude_worker, codex_worker, parse_evidence, pi_worker
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("harness", choices=("codex", "pi"))
+    parser.add_argument("harness", choices=("codex", "claude", "pi"))
     parser.add_argument("workdir", type=Path)
     parser.add_argument("--model", required=True)
     args = parser.parse_args()
@@ -20,6 +20,8 @@ def main() -> None:
     workdir.mkdir(parents=True, exist_ok=True)
     if args.harness == "codex":
         worker = codex_worker(args.model, sandbox="workspace-write", effort="low")
+    elif args.harness == "claude":
+        worker = claude_worker(args.model, allowed_tools=("Read", "Write"))
     else:
         worker = pi_worker(
             args.model,

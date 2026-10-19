@@ -191,6 +191,8 @@ def parse_evidence(harness: Literal["codex", "claude", "pi"], stdout: str) -> di
                     evidence["reported_model"] = message["model"]
             if record.get("type") == "result":
                 evidence["last_result_subtype"] = record.get("subtype")
+                if isinstance(record.get("modelUsage"), dict):
+                    evidence["model_usage"] = record["modelUsage"]
                 if isinstance(record.get("session_id"), str):
                     evidence["session_id"] = record["session_id"]
                 if isinstance(record.get("is_error"), bool):

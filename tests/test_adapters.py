@@ -6,6 +6,9 @@ These tests do not invoke a model or establish live adapter support.
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -152,6 +155,68 @@ def test_pi_evidence_distinguishes_requested_and_concrete_response_model():
     assert evidence["served_model"] == "concrete-model"
     assert evidence["response_id"] == "resp-1"
     assert evidence["settled_aborted"] is False
+
+
+def test_claude_result_preserves_usage_for_multiple_models_without_guessing():
+    usage = {
+        "claude-haiku-example": {"inputTokens": 12, "outputTokens": 8},
+        "claude-other-example": {"inputTokens": 3, "outputTokens": 1},
+    }
+    evidence = parse_evidence("claude", _jsonl({"type": "result", "modelUsage": usage}))
+    assert evidence["model_usage"] == usage
+    assert "served_model" not in evidence
+    assert "reported_model" not in evidence
+
+
+@pytest.mark.parametrize("usage", [None, "haiku", ["haiku"]])
+def test_claude_invalid_model_usage_is_not_model_evidence(usage):
+    evidence = parse_evidence("claude", _jsonl({"type": "result", "modelUsage": usage}))
+    assert "model_usage" not in evidence
+
+
+def test_claude_smoke_script_with_deterministic_executable(tmp_path: Path):
+    executable = tmp_path / "bin" / "claude"
+    executable.parent.mkdir()
+    executable.write_text(
+        f"#!{sys.executable}\n"
+        "import json, sys\n"
+        "from pathlib import Path\n"
+        "assert sys.argv[sys.argv.index('--model') + 1] == 'haiku'\n"
+        "assert '--allowedTools=Read,Write' in sys.argv\n"
+        "assert sys.argv[sys.argv.index('--permission-mode') + 1] == 'dontAsk'\n"
+        "prompt = Path(sys.argv[-1].split('`')[1]).read_text()\n"
+        "paths = [Path(line.split(': ', 1)[1]) for line in prompt.splitlines()\n"
+        "    if line.startswith('- ') and ': /' in line]\n"
+        "source = next(path for path in paths if path.name == 'source.txt')\n"
+        "output = next(path for path in paths if path.name == 'answer.txt')\n"
+        "output.write_bytes(source.read_bytes())\n"
+        "with Path('launches').open('a') as log: log.write('launch\\n')\n"
+        "print(json.dumps({'type': 'result', 'subtype': 'success', 'is_error': False,\n"
+        "    'session_id': 'synthetic', 'modelUsage': {'synthetic-haiku': {'inputTokens': 5}}}))\n"
+    )
+    executable.chmod(0o755)
+    workdir = tmp_path / "probe"
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(Path(__file__).resolve().parents[1] / "examples" / "smoke_harness.py"),
+            "claude",
+            str(workdir),
+            "--model",
+            "haiku",
+        ],
+        env={**os.environ, "PATH": str(executable.parent) + os.pathsep + os.environ["PATH"]},
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=True,
+    )
+    result = json.loads(completed.stdout)
+    assert result["status"] == "delivered"
+    assert result["attempts"] == 1
+    assert result["reused"] is True
+    assert result["evidence"]["model_usage"] == {"synthetic-haiku": {"inputTokens": 5}}
+    assert (workdir / "launches").read_text() == "launch\n"
 
 
 def test_partial_and_malformed_stream_does_not_invent_completion():

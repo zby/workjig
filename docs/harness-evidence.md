@@ -52,8 +52,8 @@ credentials were rewritten by the probe; normal harness state was allowed.
 Temporary raw records are local evidence, not distributed fixtures. The
 committed probe script reproduces the checks with a new chosen directory.
 No real quota exhaustion, authentication failure or permission denial was
-induced. Claude's factory remains command-tested and synthetically tested,
-without a real-model support claim from this session.
+induced in these Codex and Pi probes. Claude was initially command-tested and
+synthetically tested only; its subsequent real probe is recorded below.
 
 ## Usage-limit classification, 2026-10-19
 
@@ -70,3 +70,41 @@ Timeouts retain their own status; exit-zero logs alone do not trigger this
 classification. This deliberately narrow text rule does not recognize every
 provider's quota error. Deterministic subprocess tests use synthetic messages
 and exits; they do not establish real harness exit behavior or quota exhaustion.
+
+## Claude Haiku probe, 2026-10-19
+
+The operator approved `haiku` and the existing Claude Code login. Claude Code
+`2.1.303` passed this bounded probe:
+
+```sh
+uv run python examples/smoke_harness.py claude /tmp/workjig-claude-haiku-20261019-01 --model haiku
+```
+
+The script used the existing adapter with `-p --output-format stream-json
+--verbose --model haiku --permission-mode dontAsk --permission-prompts none
+--allowedTools=Read,Write` and the generated prompt pointer. It used one launch,
+a 180-second timeout, and no retries. The parent authorized execution outside
+its tool sandbox; normal Claude settings and login remained active. The tool
+allowlist is not an OS sandbox.
+
+The process ran from `18:59:07` to `18:59:17` UTC and exited **0**. It read
+`source.txt`, wrote the exact contents `headless-probe-7391` plus a newline to
+`answer.txt`, and returned `delivered`. The second call reused the same launch
+without another model invocation.
+
+- Records: `/tmp/workjig-claude-haiku-20261019-01/records`.
+- Launch: `788e1445f263423f991ada6fe035c1b2` (raw `stdout.log` and `stderr.log`
+  are under `records/launches/<launch-id>/`).
+- Session: `e77d96c7-f93b-4781-bdbe-eaca618aec31`.
+- Parsed stream: 15 records, zero parse errors, final result subtype `success`,
+  `is_error: false`.
+- Assistant-reported model: `claude-haiku-5-5`. The final `modelUsage` mapping
+  also contained `claude-haiku-5-5`, with `canonicalModel: claude-haiku-5-5`
+  and `provider: firstParty`. This is reported evidence, not an inference from
+  the requested `haiku` alias.
+
+`parse_evidence` preserves the result's `modelUsage` mapping as `model_usage`;
+it does not collapse multiple models into an inferred served-model identity.
+Synthetic parser tests and a deterministic fake-CLI subprocess test cover
+this behavior separately from the real probe. No real quota exhaustion,
+authentication failure, or permission-denial behavior was tested here.
