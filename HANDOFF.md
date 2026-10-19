@@ -23,6 +23,11 @@ any knowledge base.
   import and prose name are all `workjig`; do not rename anything.
 - Codex and Pi have passed real probes with `gpt-6.1-sol`. Claude is
   command-tested and parser-tested only, never run with a real model.
+- `uv run ruff format --check .` fails at `35c08f8` on five files
+  (`README.md`, `examples/ordinary_files.py`, `examples/smoke_harness.py`,
+  `src/workjig/models.py`, `tests/test_review.py`); `AGENTS.md` requires it
+  to pass. Fix with `uv run ruff format .` in a commit of its own, before
+  any other change.
 - No CI, no PyPI publication. `workjig` was free on PyPI on 2026-10-19 but
   is not registered.
 - Read before changing anything: `README.md` (API and support claims),
