@@ -24,9 +24,14 @@ def test_successful_retry_without_output_cannot_adopt_failed_output(tmp_path: Pa
         "Write the output.",
         {},
         ("answer.txt",),
-        CommandWorker((
-            sys.executable, str(script), "{output_dir}/answer.txt", str(tmp_path / "marker"),
-        )),
+        CommandWorker(
+            (
+                sys.executable,
+                str(script),
+                "{output_dir}/answer.txt",
+                str(tmp_path / "marker"),
+            )
+        ),
         max_launches=2,
         retry=RetryPolicy(on=("process_error",)),
     )
@@ -56,13 +61,15 @@ def test_parallel_limit_bounds_observed_live_worker_count(tmp_path: Path):
         "output.write_text('done')\n"
         "change(-1)\n"
     )
-    worker = CommandWorker((
-        sys.executable,
-        str(script),
-        "{output_dir}/answer.txt",
-        str(tmp_path / "counts.json"),
-        str(tmp_path / "counts.lock"),
-    ))
+    worker = CommandWorker(
+        (
+            sys.executable,
+            str(script),
+            "{output_dir}/answer.txt",
+            str(tmp_path / "counts.json"),
+            str(tmp_path / "counts.lock"),
+        )
+    )
     requests = [
         Request(str(index), "Write output.", {}, ("answer.txt",), worker) for index in range(5)
     ]

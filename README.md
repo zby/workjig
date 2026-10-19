@@ -17,9 +17,13 @@ from pathlib import Path
 
 from workjig import CommandWorker, Request, Run
 
-worker = CommandWorker(argv=(
-    sys.executable, str(Path("worker.py").resolve()), "{prompt}",
-))
+worker = CommandWorker(
+    argv=(
+        sys.executable,
+        str(Path("worker.py").resolve()),
+        "{prompt}",
+    )
+)
 request = Request(
     call_id="summarize-v1",
     task="Read the supplied source and write the requested summary file.",
@@ -82,7 +86,9 @@ from workjig.adapters import codex_worker, pi_worker
 
 codex = codex_worker("gpt-6.1-sol", sandbox="workspace-write", effort="low")
 pi = pi_worker(
-    "gpt-6.1-sol", provider="openai", tools=("read", "write"),
+    "gpt-6.1-sol",
+    provider="openai",
+    tools=("read", "write"),
     project_trust="no-approve",
 )
 ```

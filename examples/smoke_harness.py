@@ -53,15 +53,20 @@ def main() -> None:
         args.harness,
         (Path(attempt.launch_dir) / "stdout.log").read_text(encoding="utf-8"),
     )
-    print(json.dumps({
-        "harness": args.harness,
-        "requested_model": args.model,
-        "status": result.status,
-        "attempts": len(result.attempts),
-        "reused": repeated.reused,
-        "records": str(workdir / "records"),
-        "evidence": evidence,
-    }, sort_keys=True))
+    print(
+        json.dumps(
+            {
+                "harness": args.harness,
+                "requested_model": args.model,
+                "status": result.status,
+                "attempts": len(result.attempts),
+                "reused": repeated.reused,
+                "records": str(workdir / "records"),
+                "evidence": evidence,
+            },
+            sort_keys=True,
+        )
+    )
 
 
 if __name__ == "__main__":

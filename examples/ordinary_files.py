@@ -91,8 +91,7 @@ def workflow(
                 Request(
                     call_id=f"combine:{correction}",
                     task=(
-                        "Combine both ordinary files and answer the caller's feedback "
-                        "if supplied."
+                        "Combine both ordinary files and answer the caller's feedback if supplied."
                     ),
                     inputs=inputs,
                     required_outputs=("combined.txt",),

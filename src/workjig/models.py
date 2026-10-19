@@ -26,9 +26,15 @@ _SAFE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 _RESERVED_NAMES = frozenset(
     {"prompt.txt", "problem.json", "evidence.json", "stdout.log", "stderr.log", "inputs", "outputs"}
 )
-_PATH_TOKENS = (
-    {"prompt", "input_dir", "output_dir", "problem_file", "evidence_file", "launch_dir", "workdir"}
-)
+_PATH_TOKENS = {
+    "prompt",
+    "input_dir",
+    "output_dir",
+    "problem_file",
+    "evidence_file",
+    "launch_dir",
+    "workdir",
+}
 _PATH_TOKEN_RE = re.compile(r"\{(" + "|".join(_PATH_TOKENS) + r")\}")
 
 
