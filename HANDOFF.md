@@ -1,7 +1,9 @@
 # Handoff: workjig
 
-Written 2026-10-19 for the first agent working in this repository. Nothing
-is inherited here yet; until `AGENTS.md` exists, this file is the rule set.
+Written 2026-10-19 for the first agent working in this repository.
+`AGENTS.md` (contributor instructions adapted from Treadle, commit
+`947252d`) is the inherited rule set; this file adds the state, the ordered
+work and the acceptance for it.
 
 ## Purpose
 
@@ -21,8 +23,8 @@ any knowledge base.
   import and prose name are all `workjig`; do not rename anything.
 - Codex and Pi have passed real probes with `gpt-6.1-sol`. Claude is
   command-tested and parser-tested only, never run with a real model.
-- No `AGENTS.md`, no CI, no PyPI publication. `workjig` was free on PyPI on
-  2026-10-19 but is not registered.
+- No CI, no PyPI publication. `workjig` was free on PyPI on 2026-10-19 but
+  is not registered.
 - Read before changing anything: `README.md` (API and support claims),
   `docs/design.md` (the execution contract), `docs/harness-evidence.md`
   (what each adapter has actually demonstrated), `examples/README.md`.
@@ -45,9 +47,9 @@ If a change needs any of these to bend, stop and report the conflict instead.
 
 ## Work in order
 
-1. Write `AGENTS.md`: the purpose and boundary above, the commands below, and
-   the rule that support claims distinguish deterministic tests from real
-   model runs. Keep it short; it is the only file a future agent inherits.
+1. Read `AGENTS.md`, `README.md`, `docs/design.md` and
+   `docs/harness-evidence.md`; run the checks in `AGENTS.md` from a fresh
+   `uv sync --locked` and record the result before changing anything.
 2. Usage-limit classification. Today a provider quota error in a harness's
    raw output is a `process_error` and is retried under the retry policy. The
    messages observed in the installed harnesses are "Usage limit reached"
@@ -69,7 +71,9 @@ If a change needs any of these to bend, stop and report the conflict instead.
 
 ## Acceptance
 
-- `uv run pytest -q` and `uv run ruff check .` pass from the root.
+- The checks `AGENTS.md` lists pass from the root: `uv sync --locked`,
+  `uv run pytest`, `uv run ruff check .`, `uv run ruff format --check .`,
+  `uv build`.
 - Every new behaviour has a deterministic subprocess test; a real-harness
   probe is evidence, not a test, and is recorded as such.
 - `README.md` and `docs/design.md` say what the code does, no more. A support
