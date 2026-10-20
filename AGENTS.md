@@ -2,10 +2,16 @@
 
 ## Project
 
-[Workjig](README.md) is a standalone Python runtime for ordinary workflows
-that invoke headless subprocess workers. Workflow code owns branches, checks
-and correction loops; the runtime owns launches, separate output paths,
-bounded execution and run records. It does not require Git or Commonplace.
+[Workjig](README.md) is a standalone Python runtime whose primary goal is to
+support Commonplace as the foundation of its workflow engine. Extraction into
+an independently maintained package aims to help agents focus on a smaller
+codebase and improve its quality. Commonplace's needs drive priorities; reuse
+in other projects is a secondary opportunity.
+
+Workflow code owns branches, checks and correction loops; the runtime owns
+launches, separate output paths, bounded execution and run records. Keep
+Commonplace's domain rules in Commonplace and the runtime independently usable
+and testable. It does not require Git or Commonplace.
 
 Read the [execution contract](docs/design.md) before implementation or contract
 changes. See [harness evidence](docs/harness-evidence.md) for tested adapters

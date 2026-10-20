@@ -4,10 +4,22 @@ A standalone Python runtime for workflows that invoke headless workers.
 Workflow code owns branches, checks and correction loops. The runtime owns
 subprocess launches, separate output paths, bounded execution and run records.
 
-This package, formerly `treadle-headless`, is an independent implementation,
-staged in a Commonplace workshop. It does not import Commonplace or require a
-Git checkout. It is not a replacement for an existing Treadle installation.
-Initial platform: Linux, Python 3.11 or newer.
+## Purpose and scope
+
+Workjig's primary goal is to support Commonplace as the runtime foundation
+of its workflow engine. It is extracted into a separate package so it can be
+maintained independently. The aim is to give agents a smaller, focused codebase
+and a clear contract to work against, helping them build a better package.
+
+Commonplace's workflow needs drive development priorities. Workjig owns the
+reusable execution machinery; Commonplace owns its workflows, domain rules,
+checks and correction policies. Reuse in other projects is a secondary
+opportunity: keep the package independently usable without adding abstractions
+for hypothetical consumers.
+
+Workjig does not import Commonplace or require a Git checkout. Its tests and
+examples run independently of Commonplace. Initial platform: Linux, Python
+3.11 or newer.
 
 ## A call
 

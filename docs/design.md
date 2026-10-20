@@ -5,6 +5,18 @@ workers. It does not schedule a declarative graph or ask an agent to advance
 a step program. Calls return delivered files and execution evidence; the
 workflow decides whether their contents are acceptable and what to do next.
 
+## Purpose
+
+The primary use case is the runtime foundation for Commonplace's workflow
+engine. Maintaining Workjig as a separate package gives agents a focused
+codebase and an explicit execution contract, with the aim of improving package
+quality. Commonplace's needs guide priorities while its workflow and domain
+policy remain in Commonplace.
+
+Independent maintenance requires that Workjig can be used and tested without
+Commonplace. That boundary also permits reuse in other projects; speculative
+generality is not a goal.
+
 ## Boundaries
 
 The caller supplies an existing working directory, task inputs, output names,
