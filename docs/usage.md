@@ -55,10 +55,13 @@ them replays delivered answers and applies the new controls only to future
 launches. `CallResult.request_hash` hashes the work material, excluding these
 controls. Different identities request independent work even when prompts match.
 
-Resume is an exceptional recovery path for unchanged workflow and runtime
-code, not a way to continue old runs after code changes. If workflow or runtime
-code changes, start a fresh run directory and rerun the whole workflow. Migration
-of old runs across code changes is out of scope.
+Resume is an exceptional recovery path for workflow and runtime code
+compatible with the run, not a way to carry old runs across incompatible
+changes. Changing execution controls or adding later calls is compatible;
+changing what an existing call's result means without changing its identity is
+not. After an incompatible change, start a fresh run directory and rerun the
+whole workflow. Migration of old runs is out of scope; the runtime rejects
+record formats it does not support.
 
 The caller must also keep the surrounding environment compatible with reuse.
 Changing ambient files or tools may require a new run. The runtime does not
@@ -191,10 +194,10 @@ or runtime details with kind `launch_error` or `operator_acknowledgment`.
 An uncertain launch raises `UncertainLaunchError` before new work starts.
 Inspect `run.unresolved_launches()`, establish that the old worker and its
 children have stopped, then call `run.acknowledge_stopped(launch_id)`. To allow
-a subsequent launch, the original request must have remaining allowance and
-an explicit retry policy including `interrupted`. The caller may increase the
-total ceiling and update retry policy to authorize continuation, but already
-spent launches remain spent. Otherwise start a new run deliberately.
+a subsequent launch, the request supplied when continuing must have remaining
+allowance and an explicit retry policy including `interrupted`. The caller may
+increase the total ceiling and update retry policy to authorize continuation,
+but already spent launches remain spent. Otherwise start a new run deliberately.
 
 Corrupt records raise `RecordError`. A persistence failure can poison the
 current controller: close and reopen it before inspection or recovery. Never

@@ -15,8 +15,9 @@ rather than continuing the existing work.
 The [review proposal](evidence/execution-policy-and-continuation-proposal.md)
 explored these changes. The maintainer confirmed there are no saved runs to
 preserve, backward compatibility is not required, and run migration across code
-changes is out of scope. Resume supports recovery with unchanged workflow/runtime
-code and a compatible environment, not upgrades.
+changes is out of scope. Resume supports recovery with compatible workflow and
+runtime code and environment, not upgrades across incompatible changes; changing
+execution controls is compatible by design.
 
 ## Decision
 
@@ -54,7 +55,9 @@ unchanged. `protocol_error` remains nonretryable.
 Use record format version 2 and reject older formats. Do not provide migration
 or a legacy mode. Keep the stored `attempts` field name; renaming it is unrelated
 to this change. ADR 001's historical format-preservation rationale does not imply
-a continuing compatibility commitment.
+a continuing compatibility commitment. Always store `output_protocol`, including
+an absent value; ADR 002's omission of that default to preserve existing records
+no longer applies.
 
 ## Considered alternatives
 

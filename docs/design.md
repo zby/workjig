@@ -54,12 +54,16 @@ acceptance is separate: a resumed workflow reruns its checks against the
 intended input snapshot. It must not use changing sibling output state as an
 implicit input to a parallel check.
 
-Resume is an exceptional recovery path, not a way to carry runs across code
-changes. Reuse assumes unchanged workflow and runtime code and a compatible
-surrounding environment. If either codebase changes, start a fresh run directory
-and rerun the whole workflow. Run migration across code changes is out of scope,
-not a deferred compatibility feature. The caller is responsible for deciding
-whether reuse is appropriate; Workjig does not detect all incompatible changes.
+Resume is an exceptional recovery path, not a way to carry runs across
+incompatible changes. Reuse assumes workflow and runtime code compatible with
+the recorded run and a compatible surrounding environment. A code change is
+compatible when replayed calls keep their identities and the meaning of their
+delivered results, and the runtime still accepts the run record. Changing
+execution controls or adding later calls is compatible by design. After an
+incompatible change, start a fresh run directory and rerun the whole workflow.
+Run migration is out of scope, not a deferred compatibility feature. The caller
+is responsible for deciding whether reuse is appropriate; Workjig rejects
+unsupported record formats but does not detect other incompatible changes.
 A fresh run does not undo earlier external effects.
 
 ## Budgets and interruption
