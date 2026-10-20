@@ -127,11 +127,22 @@ automatic interpretation of those CLI streams.
 `usage_limit`, `process_error`, `timeout`, `launch_error`, `protocol_error`,
 and an explicitly acknowledged `interrupted` launch. `RetryPolicy(on=(...),
 backoff_seconds=...)` selects which eligible execution outcomes to retry up
-to `Request.max_launches`. Usage-limit results are not automatically retried.
+to `Request.max_launches`. `usage_limit` and `protocol_error` cannot be
+selected for automatic retry.
 Recognition comes from the structured problem-file protocol or a nonzero exit
 whose stdout or stderr contains `usage limit` (case-insensitive). A timed-out
 launch remains `timeout`, even if its logs contain that phrase. Other provider
 quota messages in raw harness logs are not universally classified.
+
+If children outlive the worker leader, the runtime terminates the remaining
+process group and returns `process_error`, even after exit zero with complete
+outputs. A valid `usage_limit` problem or a nonzero exit with the raw-log marker
+takes precedence over that error; a timeout takes precedence over both.
+Cleanup sends SIGTERM, waits up to 0.25 seconds while reaping the leader, then
+sends SIGKILL if the group still exists.
+
+`Attempt.problem` holds either a worker's `unable` or `usage_limit` report,
+or runtime details with kind `launch_error` or `operator_acknowledgment`.
 
 An uncertain launch raises `UncertainLaunchError` before new work starts.
 Inspect `run.unresolved_launches()`, establish that the old worker and its
@@ -144,6 +155,11 @@ identity; it is not a way to continue the original call's budget.
 Corrupt records raise `RecordError`. A persistence failure can poison the
 current controller: close and reopen it before inspection or recovery. Never
 delete a reservation merely to suppress uncertainty.
+An exception or keyboard interruption after reservation also requires explicit
+recovery, even when process cleanup ran: cleanup alone does not commit a
+terminal record. If `run.json` is missing from an existing record directory,
+preserve that directory, confirm any old workers have stopped, and choose a
+fresh directory and launch allowances deliberately.
 
 ## Boundaries
 
@@ -162,15 +178,16 @@ model invocations.
 Run commands from this package directory:
 
 ```sh
-uv sync
+uv sync --locked
 uv run pytest
 uv run ruff check .
+uv run ruff format --check .
 uv build
 ```
 
 Tests use real subprocesses with deterministic worker fixtures. They do not
 require model credentials. Real-harness probes are separate, bounded operations.
-No package has been published by creating this source tree.
+Building creates local distribution artifacts; publishing is a separate step.
 
 The [ordinary-file example](examples/README.md) demonstrates checks, corrections
 and resume. To run a real, credential-using probe deliberately:

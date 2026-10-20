@@ -67,8 +67,10 @@ def _group_exists(pgid: int) -> bool:
     return True
 
 
-def _cleanup_group(pgid: int) -> bool:
+def _cleanup_group(process: subprocess.Popen[bytes]) -> bool:
     """Terminate descendants even if the leader has already exited."""
+    pgid = process.pid
+    process.poll()
     if not _group_exists(pgid):
         return False
     try:
@@ -77,6 +79,9 @@ def _cleanup_group(pgid: int) -> bool:
         return False
     deadline = time.monotonic() + 0.25
     while time.monotonic() < deadline:
+        # Reap the leader so its zombie does not keep an empty group alive.
+        # Still inspect the group: surviving children need cleanup too.
+        process.poll()
         if not _group_exists(pgid):
             return True
         time.sleep(0.01)
@@ -183,7 +188,7 @@ def launch(
         except subprocess.TimeoutExpired:
             timed_out = True
         finally:
-            group_lingered = _cleanup_group(process.pid)
+            group_lingered = _cleanup_group(process)
             if process.poll() is None:
                 process.wait(timeout=1)
     finally:
@@ -194,18 +199,22 @@ def launch(
     evidence = _read_evidence(paths["evidence_file"])
     outputs: dict[str, str] = {}
     missing: list[str] = []
+    # Keep emitted invariants consistent with run._attempt_from_dict; preserve
+    # compatibility with records produced by earlier classification rules.
     if timed_out:
         status = "timeout"
     elif process.returncode != 0 and (
         _has_usage_limit(stdout_path) or _has_usage_limit(stderr_path)
     ):
         status = "usage_limit"
+    elif problem is not None and problem["kind"] == "usage_limit":
+        status = "usage_limit"
     elif group_lingered:
         status = "process_error"
     elif invalid_problem:
         status = "protocol_error"
     elif problem is not None:
-        status = "usage_limit" if problem["kind"] == "usage_limit" else "worker_problem"
+        status = "worker_problem"
     elif process.returncode != 0:
         status = "process_error"
     else:

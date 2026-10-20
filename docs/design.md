@@ -63,9 +63,21 @@ sufficient evidence: it may have been reused. Recovery does not refund the
 reservation or adopt unrecorded output files.
 
 Handled timeouts terminate the owned process group, including children whose
-leader has already exited. Independent parallel calls settle before group
+leader has already exited. Cleanup sends SIGTERM and gives the group up to
+0.25 seconds to exit, reaping the leader while checking for remaining members,
+then sends SIGKILL if needed. A child outliving a normally exited leader causes
+`process_error`, even if that leader exited zero and wrote complete outputs.
+Usage-limit classification takes precedence over this error as described below.
+Independent parallel calls settle before group
 failure is reported. Abrupt process death cannot promise that children have
 stopped; that case follows the explicit recovery rule above.
+
+An exception or keyboard interruption after reservation leaves the launch
+unresolved even if cleanup ran. Explicit acknowledgment is still required;
+cleanup without a committed completion record does not establish settlement.
+An existing record directory without `run.json` is rejected, including after
+an interrupted first open. Preserve it for inspection, confirm any old workers
+have stopped, and deliberately choose a fresh run directory and allowances.
 
 Retries of execution failures are bounded and explicit. Content corrections
 are caller-owned calls carrying feedback and previous results. A bounded
@@ -75,7 +87,8 @@ conflated.
 A nonzero exit with `usage limit` anywhere in stdout or stderr, ignoring case,
 is classified as `usage_limit` and is not automatically retried. This takes
 precedence over other completed-process failures; a handled timeout remains
-`timeout`. The structured problem-file protocol also supports `usage_limit`.
+`timeout`. A valid structured `usage_limit` problem has the same precedence,
+including when the leader exits zero or leaves children behind.
 A successful exit is not reclassified based on log text alone.
 
 ## Limits

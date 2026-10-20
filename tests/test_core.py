@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import select
 import signal
 import subprocess
 import sys
@@ -21,8 +22,145 @@ from workjig import (
     RunBusyError,
     UncertainLaunchError,
 )
+from workjig.harness import _cleanup_group
 
 SRC = Path(__file__).resolve().parents[1] / "src"
+
+
+@pytest.mark.parametrize("ignore_term", [False, True])
+def test_cleanup_reaps_cooperative_leader_and_escalates_uncooperative_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ignore_term: bool
+) -> None:
+    script = tmp_path / "term.py"
+    handler = "signal.SIG_IGN" if ignore_term else "lambda *_: sys.exit(0)"
+    script.write_text(
+        "import signal, sys, time\n"
+        f"signal.signal(signal.SIGTERM, {handler})\n"
+        "print('ready', flush=True)\n"
+        "while True: time.sleep(1)\n"
+    )
+    process = subprocess.Popen(
+        [sys.executable, str(script)], stdout=subprocess.PIPE, start_new_session=True
+    )
+    signals = []
+    killpg = os.killpg
+
+    def observed_killpg(pgid: int, sig: int) -> None:
+        if sig:
+            signals.append(sig)
+        killpg(pgid, sig)
+
+    monkeypatch.setattr("workjig.harness.os.killpg", observed_killpg)
+    try:
+        assert select.select([process.stdout], [], [], 5)[0], "worker did not become ready"
+        assert process.stdout.readline() == b"ready\n"
+        assert _cleanup_group(process)
+        process.wait(timeout=5)
+        assert process.returncode == (-signal.SIGKILL if ignore_term else 0)
+        assert signals == ([signal.SIGTERM, signal.SIGKILL] if ignore_term else [signal.SIGTERM])
+    finally:
+        if process.poll() is None:
+            killpg(process.pid, signal.SIGKILL)
+        process.wait(timeout=5)
+        process.stdout.close()
+
+
+@pytest.mark.parametrize("report", ["none", "raw", "problem"])
+def test_lingering_child_usage_precedence_and_replay(tmp_path: Path, report: str) -> None:
+    script = tmp_path / "linger.py"
+    script.write_text(
+        "import json, subprocess, sys\n"
+        "from pathlib import Path\n"
+        "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])\n"
+        "Path(sys.argv[3], 'result.txt').write_text('premature')\n"
+        + (
+            "print('Usage limit reached')\nsys.exit(7)\n"
+            if report == "raw"
+            else 'Path(sys.argv[4]).write_text(\'{"kind":"usage_limit","message":"quota"}\')\n'
+            if report == "problem"
+            else ""
+        )
+    )
+    request = _request(_worker(script), max_launches=2, retry=RetryPolicy(on=("worker_problem",)))
+    records = tmp_path / "records"
+    with Run(records, tmp_path) as run:
+        result = run.call(request)
+    assert result.status == ("process_error" if report == "none" else "usage_limit")
+    assert result.outputs == {}
+    assert len(result.attempts) == 1
+    with Run(records, tmp_path) as run:
+        replay = run.call(request)
+    assert replay.reused
+    assert replay.status == result.status
+    assert replay.attempts == result.attempts
+
+
+def test_protocol_names_are_safe_inside_input_and_output_directories(tmp_path: Path) -> None:
+    names = (
+        "prompt.txt",
+        "problem.json",
+        "evidence.json",
+        "stdout.log",
+        "stderr.log",
+        "inputs",
+        "outputs",
+    )
+    worker = CommandWorker(
+        (
+            sys.executable,
+            "-c",
+            "import pathlib, shutil, sys; "
+            "shutil.copytree(sys.argv[1], sys.argv[2], dirs_exist_ok=True)",
+            "{input_dir}",
+            "{output_dir}",
+        )
+    )
+    request = Request("names", "Copy inputs.", dict.fromkeys(names, "payload"), names, worker)
+    with Run(tmp_path / "records", tmp_path) as run:
+        result = run.call(request)
+    assert result.status == "delivered"
+    assert result.outputs == dict(request.inputs)
+    with Run(tmp_path / "records", tmp_path) as run:
+        assert run.call(request).reused
+
+
+def test_first_open_missing_record_preserves_directory_and_explains_recovery(
+    tmp_path: Path,
+) -> None:
+    records = tmp_path / "records"
+    records.mkdir()
+    (records / ".lock").touch()
+    with pytest.raises(RecordError, match="confirm any old workers have stopped"):
+        with Run(records, tmp_path):
+            pass
+    assert not (records / "run.json").exists()
+    assert (records / ".lock").exists()
+
+
+def test_cooperative_timeout_commits_timeout_even_after_exit_zero(tmp_path: Path) -> None:
+    script = tmp_path / "worker.py"
+    stopped = tmp_path / "stopped"
+    script.write_text(
+        "import signal, sys, time\n"
+        "from pathlib import Path\n"
+        "def stop(*_):\n"
+        f"    Path({str(stopped)!r}).write_text('clean shutdown')\n"
+        "    sys.exit(0)\n"
+        "signal.signal(signal.SIGTERM, stop)\n"
+        "Path(sys.argv[3], 'result.txt').write_text('unfinished')\n"
+        "while True: time.sleep(1)\n"
+    )
+    request = _request(_worker(script), timeout=2)
+    with Run(tmp_path / "records", tmp_path) as run:
+        result = run.call(request)
+    assert result.status == "timeout"
+    assert result.attempts[0].returncode == 0
+    assert result.outputs == {}
+    assert stopped.read_text() == "clean shutdown"
+    with Run(tmp_path / "records", tmp_path) as run:
+        replay = run.call(request)
+    assert replay.reused
+    assert replay.status == "timeout"
 
 
 def _worker(script: Path, *args: str) -> CommandWorker:
@@ -128,6 +266,7 @@ def test_process_group_children_are_stopped(tmp_path: Path, leader_exits: bool) 
     script = tmp_path / "worker.py"
     script.write_text(
         """\
+import os
 import subprocess
 import sys
 import time
@@ -135,23 +274,44 @@ from pathlib import Path
 
 _, inputs, outputs, problem, marker, mode = sys.argv[1:7]
 subprocess.Popen([sys.executable, '-c',
-    'import sys,time; from pathlib import Path; '
-    'time.sleep(0.6); Path(sys.argv[1]).write_text("escaped")',
+    'import os,signal,sys,time; from pathlib import Path; '
+    'signal.signal(signal.SIGTERM, signal.SIG_IGN); '
+    'Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(30)',
     marker])
+deadline = time.monotonic() + 5
+while not Path(marker).exists():
+    if time.monotonic() > deadline: raise RuntimeError('child did not start')
+    time.sleep(0.01)
 (Path(outputs) / 'result.txt').write_text('premature')
 if mode == 'wait':
     time.sleep(10)
 """,
         encoding="utf-8",
     )
-    marker = tmp_path / "escaped.txt"
+    marker = tmp_path / "child.pid"
     worker = _worker(script, str(marker), "exit" if leader_exits else "wait")
     with Run(tmp_path / "records", tmp_path) as run:
-        result = run.call(_request(worker, timeout=0.1))
+        result = run.call(_request(worker, timeout=2))
     assert result.status == ("process_error" if leader_exits else "timeout")
     assert result.outputs == {}
-    time.sleep(0.7)
-    assert not marker.exists(), "a child survived the leader's completion/timeout"
+    child_pid = int(marker.read_text())
+    try:
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            try:
+                state = Path(f"/proc/{child_pid}/stat").read_text().split(") ", 1)[1]
+            except FileNotFoundError:
+                break
+            if state.startswith("Z"):
+                break
+            time.sleep(0.01)
+        else:
+            pytest.fail("a child survived the leader's completion/timeout")
+    finally:
+        try:
+            os.kill(child_pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
 
 
 def test_lock_workdir_binding_and_closed_controller(tmp_path: Path) -> None:
@@ -178,7 +338,7 @@ def test_cleanup_error_leaves_reservation_unresolved(
     script.write_text("import time\ntime.sleep(5)\n", encoding="utf-8")
     call = _request(_worker(script), timeout=0.05)
 
-    def fail_cleanup(_: int) -> bool:
+    def fail_cleanup(_: subprocess.Popen[bytes]) -> bool:
         raise PermissionError("injected cleanup failure")
 
     monkeypatch.setattr("workjig.harness._cleanup_group", fail_cleanup)

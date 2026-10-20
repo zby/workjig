@@ -23,9 +23,6 @@ FAILURE_STATUSES = frozenset(
 )
 RETRYABLE_STATUSES = FAILURE_STATUSES - {"usage_limit", "protocol_error"}
 _SAFE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
-_RESERVED_NAMES = frozenset(
-    {"prompt.txt", "problem.json", "evidence.json", "stdout.log", "stderr.log", "inputs", "outputs"}
-)
 _PATH_TOKENS = {
     "prompt",
     "input_dir",
@@ -39,10 +36,8 @@ _PATH_TOKEN_RE = re.compile(r"\{(" + "|".join(_PATH_TOKENS) + r")\}")
 
 
 def _safe_name(value: str) -> str:
-    if not isinstance(value, str) or not _SAFE_NAME.fullmatch(value) or value in {".", ".."}:
+    if not isinstance(value, str) or not _SAFE_NAME.fullmatch(value):
         raise ValueError(f"unsafe file name: {value!r}")
-    if value in _RESERVED_NAMES:
-        raise ValueError(f"reserved file name: {value!r}")
     return value
 
 

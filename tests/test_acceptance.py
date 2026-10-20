@@ -209,7 +209,7 @@ def test_request_and_result_are_immutable_snapshots(command_script: Path, tmp_pa
     assert len(events(log)) == 2
 
 
-def test_parallel_group_waits_for_all_calls_before_reporting_failure(
+def test_parallel_group_returns_all_execution_outcomes(
     command_script: Path, tmp_path: Path
 ) -> None:
     log = tmp_path / "events.jsonl"
@@ -227,6 +227,55 @@ def test_parallel_group_waits_for_all_calls_before_reporting_failure(
     assert any(e["event"] == "done" and e["mode"] == "sleep_success" for e in observed)
     assert results[0].status != "delivered"
     assert results[1].status == "delivered"
+
+
+def test_parallel_group_settles_running_and_queued_calls_before_raising(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import workjig.run as run_module
+
+    ready, release = tmp_path / "ready", tmp_path / "release"
+    script = tmp_path / "worker.py"
+    script.write_text(
+        "import sys, time\n"
+        "from pathlib import Path\n"
+        "ready, release, output = map(Path, sys.argv[1:])\n"
+        "ready.touch()\n"
+        "deadline = time.monotonic() + 10\n"
+        "while not release.exists():\n"
+        "    if time.monotonic() > deadline: raise RuntimeError('release never arrived')\n"
+        "    time.sleep(0.01)\n"
+        "output.write_text('finished')\n"
+    )
+    worker = CommandWorker(
+        (sys.executable, str(script), str(ready), str(release), "{output_dir}/result.txt")
+    )
+    prepare = run_module.prepare
+
+    def fail_one(request, launch_dir, workdir):
+        if request.call_id == "fail":
+            deadline = time.monotonic() + 5
+            while not ready.exists() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            assert ready.exists(), "sibling worker did not start"
+            release.touch()
+            raise OSError("injected preparation failure")
+        return prepare(request, launch_dir, workdir)
+
+    monkeypatch.setattr(run_module, "prepare", fail_one)
+    with Run(tmp_path / "records", tmp_path) as run:
+        with pytest.raises(ExceptionGroup) as caught:
+            run.parallel(
+                [request(name, worker) for name in ("fail", "running", "queued")],
+                max_workers=2,
+            )
+        assert len(caught.value.exceptions) == 1
+        assert str(caught.value.exceptions[0]) == "injected preparation failure"
+        for name in ("running", "queued"):
+            result = run.call(request(name, worker))
+            assert result.reused, "parallel returned before committing all sibling results"
+            assert result.outputs == {"result.txt": "finished"}
+        assert not run.unresolved_launches()
 
 
 @pytest.mark.parametrize("delays", [(0.0, 0.2), (0.2, 0.0)])

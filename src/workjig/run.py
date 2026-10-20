@@ -15,6 +15,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 from .harness import launch, prepare
 from .models import FAILURE_STATUSES, Attempt, CallResult, CommandWorker, Request, RetryPolicy
@@ -204,6 +205,8 @@ def _attempt_from_dict(value: object) -> Attempt:
     ):
         raise RecordError("invalid attempt missing_outputs")
 
+    # These invariants correspond to harness.launch and acknowledge_stopped.
+    # Classification changes must also keep previously valid records readable.
     pid, returncode = value["pid"], value["returncode"]
     started, finished = value["started_at"], value["finished_at"]
     if status in {"reserved", "running"}:
@@ -381,7 +384,11 @@ class Run:
                     raise RecordError("run workdir differs from recorded workdir")
             else:
                 if had_lock or any(path.name != ".lock" for path in self.record_dir.iterdir()):
-                    raise RecordError("run record is missing")
+                    raise RecordError(
+                        "run record is missing; preserve this directory for inspection, "
+                        "confirm any old workers have stopped, and start a new run in a "
+                        "fresh directory with deliberately chosen launch allowances"
+                    )
                 self._state = {"version": 1, "workdir": str(self.workdir), "calls": {}}
                 self._write_state()
             (self.record_dir / "launches").mkdir(exist_ok=True)
@@ -548,8 +555,6 @@ class Run:
                     prior = tuple(_attempt_from_dict(value) for value in entry["attempts"])
                     if prior:
                         previous = prior[-1]
-                        if previous.status in {"reserved", "running"}:
-                            raise UncertainLaunchError((previous,))
                         if (
                             len(prior) >= request.max_launches
                             or previous.status not in request.retry.on
@@ -639,4 +644,5 @@ class Run:
                     errors.append(error)
         if errors:
             raise ExceptionGroup("parallel calls failed", errors)
-        return tuple(result for result in results if result is not None)
+        # Every future completed without raising, so every slot has a result.
+        return cast(tuple[CallResult, ...], tuple(results))

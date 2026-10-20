@@ -31,7 +31,13 @@ not treat help inspection or synthetic parsing tests as live execution evidence.
 
 ## Adapter gate
 
-These are proposed command forms, not supported-adapter claims. For each harness, phase 5 still needs one bounded real launch that reads a named input, writes a named output, records attributable evidence, and then proves cached reuse without another model launch. Failure parsing may be tested with captured or synthetic fixtures, clearly labeled. Observe actual permission denials, model/session fields, process exits, and quota messages before classifying them. Pi additionally needs a controlled test location or approved environment where its trust lock can be created; do not change the user's existing trust or credentials to make a probe pass.
+Help inspection establishes command forms, not successful execution. The bounded
+real probes below establish file delivery and cached reuse for the listed Codex,
+Pi and Claude versions. Their scope does not establish every failure mode or
+permission configuration. Failure parsing also has synthetic test coverage,
+which is distinct from those probes. Future probes need a controlled location
+and suitable permissions, including for Pi's trust lock; do not change existing
+trust or credentials to make a probe pass.
 
 ## Real probes, 2026-10-19
 

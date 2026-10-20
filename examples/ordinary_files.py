@@ -12,7 +12,7 @@ import json
 import sys
 from pathlib import Path
 
-from workjig import CommandWorker, Request, Run
+from workjig import CallResult, CommandWorker, Request, Run
 
 WORKER = Path(__file__).with_name("ordinary_worker.py")
 
@@ -34,7 +34,7 @@ def worker(operation: str, log_file: Path, delay: float = 0.0) -> CommandWorker:
     )
 
 
-def delivered(result: object, label: str) -> None:
+def delivered(result: CallResult, label: str) -> None:
     if result.status != "delivered":
         raise RuntimeError(f"{label}: {result.status}")
 
