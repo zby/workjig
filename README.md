@@ -202,7 +202,8 @@ configures permissions, credentials and the harness environment. External
 effects are not transactional and may need caller-owned recovery.
 
 See [the execution contract](docs/design.md) for guarantees and limits,
-[design rationale](docs/design-rationale.md) for the choices behind them, and
+[design rationale](docs/design-rationale.md) and
+[decision records](adr/README.md) for the choices behind them, and
 [harness evidence](docs/harness-evidence.md) for adapter evidence and tested
 versions. Support claims must distinguish deterministic tests from actual
 model invocations.

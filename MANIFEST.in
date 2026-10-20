@@ -1,3 +1,4 @@
 recursive-include docs *.md
+recursive-include adr *.md
 recursive-include examples *.py *.md
 include uv.lock

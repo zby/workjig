@@ -13,8 +13,10 @@ launches, separate output paths, bounded execution and run records. Keep
 Commonplace's domain rules in Commonplace and the runtime independently usable
 and testable. It does not require Git or Commonplace.
 
-Read the [execution contract](docs/design.md) before implementation or contract
-changes. See [harness evidence](docs/harness-evidence.md) for tested adapters
+Read the [execution contract](docs/design.md) and relevant
+[decision records](adr/README.md) before implementation or contract changes.
+Record consequential implemented choices using the ADR guide, with supporting
+material in `adr/evidence/`. See [harness evidence](docs/harness-evidence.md) for tested adapters
 and versions. Distinguish deterministic test coverage from actual model
 invocations when making support claims.
 

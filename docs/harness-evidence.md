@@ -114,3 +114,70 @@ it does not collapse multiple models into an inferred served-model identity.
 Synthetic parser tests and a deterministic fake-CLI subprocess test cover
 this behavior separately from the real probe. No real quota exhaustion,
 authentication failure, or permission-denial behavior was tested here.
+
+## Usage-limit investigation, 2026-10-20
+
+Investigated at `71cdf30`, without changing classification policy. Six bounded
+Python subprocess scenarios used isolated temporary records, a three-second
+per-launch timeout, `max_launches=2`, and retries only on `process_error`.
+Each scenario was reopened to check replay without further execution.
+
+| Synthetic worker behavior | Observed status | Launches |
+|---|---|---|
+| Print `Quoted document: usage limit is a pricing term` to stdout, exit 3 | `usage_limit` | 1 |
+| Print the same quotation to stderr, exit 3 | `usage_limit` | 1 |
+| Print `disk error` to stderr, exit 3 | `process_error` | 2 |
+| Print JSON with `type: result`, `is_error: true`, `errors: [insufficient_quota]`, exit 3 | `process_error` | 2 |
+| Write a valid `usage_limit` problem file, exit 0 | `usage_limit` | 1 |
+| Deliver the required output, print `usage limit`, exit 0 | `delivered` | 1 |
+
+All six outcomes replayed unchanged. The JSON quota example is a constructed
+input to test the classifier, not an observed harness failure schema. These
+results establish the classifier's false-positive mechanism and dependence on
+wording, not how frequently those cases occur in real use.
+
+### What public harness interfaces establish
+
+- **Codex 0.162.1:** the version-tagged
+  [JSONL event definitions](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/exec/src/exec_events.rs)
+  expose `turn.failed.error.message` and top-level `error.message` as strings.
+  These error structures do not carry a quota-specific code. Restricting phrase
+  matching to those fields would avoid scanning ordinary item content, but
+  would still be a text heuristic. The
+  [noninteractive guide](https://developers.openai.com/codex/noninteractive)
+  confirms stdout includes agent messages and command-execution events.
+- **Claude:** the current
+  [headless guide](https://code.claude.com/docs/en/headless)
+  documents in-run failures on stdout and startup flag errors on stderr.
+  Stream output ends with a `result` message. Its `system/api_retry` events
+  include `rate_limit` and `billing_error` categories, but describe attempts
+  that the harness is retrying, not necessarily terminal failure. Stderr-only
+  detection would therefore discard a documented failure channel; an earlier
+  retry event alone cannot establish quota exhaustion.
+- **Pi:** the previously recorded interface inspection above establishes error
+  messages and retry/settlement events, but no stable quota-specific marker.
+  No additional Pi failure-protocol verification was performed in this pass.
+
+The three retained real probe logs listed above were also re-parsed. All were
+successful exit-zero deliveries: Codex ended with `turn.completed`, Claude with
+`success`, and Pi with `stop`. They provide no quota-failure specimens. No live
+quota exhaustion was induced during this investigation.
+
+### Recommendation and decisions still needed
+
+Do not replace the current rule with stderr-only scanning: it retains the same
+quotation problem and loses documented stdout failures. The useful direction
+is harness-specific selection of terminal error fields, with fixtures tied to
+supported versions. Existing `parse_evidence` output is not sufficient for all
+of this: for example, it counts Codex error events but omits their messages.
+
+Keep worker-written `usage_limit` reports conceptually separate from provider
+confirmation. They can remain an explicit request to stop automatic retries
+without claiming the provider's quota was independently verified.
+
+Before implementation, decide what unknown or malformed harness streams should
+do and whether generic command workers retain raw-log matching. Falling back
+to whole-log scanning would retain its false positives; falling back to
+`process_error` could retry an unrecognized quota stop. Current evidence does
+not settle that tradeoff. Existing recorded outcomes also replay as recorded;
+a new classifier would not automatically reinterpret them.

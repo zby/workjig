@@ -3,7 +3,8 @@
 The [execution contract](design.md) describes what Workjig does. This document
 explains why, which costs we accept, and what would justify revisiting a choice.
 Commonplace is the primary consumer; its concrete workflow needs guide these
-tradeoffs.
+tradeoffs. Focused [decision records](../adr/README.md) capture implemented
+choices and their alternatives as decisions are made or revisited.
 
 ## Ordinary Python owns workflow control
 
@@ -154,7 +155,7 @@ records or outcome classification.
 Commonplace uses “attempt” for a larger unit that includes content checking and
 correction. Distinct names keep those two budgets and lifecycles clear at the
 integration boundary. The persisted JSON field remains `attempts` so existing
-run records keep their format.
+run records keep their format. See [ADR 001](../adr/001-name-physical-launch-records.md).
 
 ## Consumer feedback to evaluate
 
