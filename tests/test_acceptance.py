@@ -548,3 +548,40 @@ def test_failed_result_commit_poisoned_controller_until_reopen(
     assert resumed.status == "delivered"
     assert len(resumed.launches) == 2
     assert len([e for e in events(log) if e["event"] == "start"]) == 2
+
+
+@pytest.mark.subprocess
+def test_problem_written_before_nonzero_exit_is_a_worker_problem(
+    command_script: Path, tmp_path: Path
+) -> None:
+    log = tmp_path / "events.jsonl"
+    call = request(
+        "problem-exit",
+        command(command_script, log, "first_partial"),
+        max_launches=2,
+        retry=RetryPolicy(on=("process_error",)),
+    )
+    with Run(tmp_path / "records", tmp_path) as run:
+        result = run.call(call)
+    assert result.status == "worker_problem"
+    assert result.outputs == {}
+    assert len(result.launches) == 1, "a worker problem is not a process error to relaunch"
+    assert result.launches[0].returncode == 7
+    assert result.launches[0].problem == {"kind": "unable", "message": "first launch failed"}
+
+
+@pytest.mark.subprocess
+def test_backoff_is_waited_between_relaunches_only(command_script: Path, tmp_path: Path) -> None:
+    log = tmp_path / "events.jsonl"
+    waits: list[float] = []
+    call = request(
+        "backoff",
+        command(command_script, log, "always_fail"),
+        max_launches=3,
+        retry=RetryPolicy(on=("process_error",), backoff_seconds=5),
+    )
+    with Run(tmp_path / "records", tmp_path, sleep=waits.append) as run:
+        result = run.call(call)
+    assert result.status == "process_error" and result.failed_at_launch_limit
+    assert len(result.launches) == 3
+    assert waits == [5.0, 5.0], "no wait before the first launch, one before each relaunch"
