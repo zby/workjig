@@ -36,7 +36,10 @@ or that the output passed a current check.
 
 A run owns its record directory under an exclusive controller lock. Within a
 run, the caller gives each logical call a stable identity. Reuse also requires
-matching declared request material. Two independent calls with identical
+matching declared work material: task, inputs, required and optional outputs,
+and worker configuration. Timeout, total launch ceiling, and retry policy are
+execution controls, excluded from identity. Changing them replays delivered
+results and affects only future launches. Two independent calls with identical
 prompts have different identities. Changes to supplied content must not reuse
 the earlier result.
 
@@ -51,13 +54,25 @@ acceptance is separate: a resumed workflow reruns its checks against the
 intended input snapshot. It must not use changing sibling output state as an
 implicit input to a parallel check.
 
+Resume is an exceptional recovery path, not a way to carry runs across code
+changes. Reuse assumes unchanged workflow and runtime code and a compatible
+surrounding environment. If either codebase changes, start a fresh run directory
+and rerun the whole workflow. Run migration across code changes is out of scope,
+not a deferred compatibility feature. The caller is responsible for deciding
+whether reuse is appropriate; Workjig does not detect all incompatible changes.
+A fresh run does not undo earlier external effects.
+
 ## Budgets and interruption
 
 A durable reservation precedes each process start and spends one launch
 allowance. A reservation can therefore count a process that did not actually
 start if the controller stopped between reservation and launch. This is a
 conservative budget, not an exact process census. Retrying cannot reset spent
-allowances by restarting the controller.
+allowances by restarting the controller. The caller may explicitly raise the
+total ceiling to permit more launches; all prior reservations remain spent.
+Current retry selection and backoff apply to the latest recorded failure.
+A lower ceiling does not invalidate history. Each reservation records its
+effective timeout, ceiling, retry policy, and any approved usage-stop ID.
 
 An unfinished reservation makes prior execution uncertain. Automatic resume
 must stop until the operator establishes that the old worker is no longer
@@ -92,7 +107,12 @@ the terminal outcome before classifying its cause: intermediate retry errors
 and ordinary task text do not establish failure. A recognized terminal quota,
 billing or unrecovered rate-limit failure becomes nonretryable `usage_limit`,
 including at exit zero. The harness handles short retries; after it gives up,
-the workflow decides whether and when to try again.
+the workflow decides whether and when to try again. To continue the same history,
+the caller explicitly approves the latest usage-stop launch ID and supplies
+remaining allowance. The next reservation durably records that approval.
+Repeating it after continuation or delivery is harmless, but cannot approve a
+later usage stop. Ordinary retry rules govern subsequent non-usage failures.
+Approval never bypasses unresolved-launch recovery.
 
 A valid structured `usage_limit` problem remains a separate explicit stop signal.
 Either kind of usage stop takes precedence over other completed-process failures,

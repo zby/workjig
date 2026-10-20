@@ -1,0 +1,33 @@
+Creating filelist for workjig
+Creating filelist for workjig.egg-info
+Categorizing files.
+Finding a working MD5 command....
+Found a working MD5 command.
+Computing results.
+
+
+SLOC	Directory	SLOC-by-Language (Sorted)
+1356    workjig         python=1356
+0       workjig.egg-info (none)
+
+
+Totals grouped by language (dominant language first):
+python:        1356 (100.00%)
+
+
+
+
+Total Physical Source Lines of Code (SLOC)                = 1,356
+Development Effort Estimate, Person-Years (Person-Months) = 0.28 (3.30)
+ (Basic COCOMO model, Person-Months = 2.4 * (KSLOC**1.05))
+Schedule Estimate, Years (Months)                         = 0.33 (3.94)
+ (Basic COCOMO model, Months = 2.5 * (person-months**0.38))
+Estimated Average Number of Developers (Effort/Schedule)  = 0.84
+Total Estimated Cost to Develop                           = $ 37,198
+ (average salary = $56,286/year, overhead = 2.40).
+SLOCCount, Copyright (C) 2001-2004 David A. Wheeler
+SLOCCount is Open Source Software/Free Software, licensed under the GNU GPL.
+SLOCCount comes with ABSOLUTELY NO WARRANTY, and you are welcome to
+redistribute it under certain conditions as specified by the GNU GPL license;
+see the documentation for details.
+Please credit this data as "generated using David A. Wheeler's 'SLOCCount'."

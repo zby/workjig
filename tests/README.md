@@ -26,6 +26,8 @@ Select by boundary with `-m`, and by subject with a filename or `-k`.
 | `test_acceptance.py` | Public API and ordinary-file workflow, parallel settlement, corrections and recovery | Mixed |
 | `test_metadata.py` | Untrusted worker problem/evidence files, including FIFOs and timeouts | Subprocess |
 | `test_record_validation.py` | Corruption and lifecycle validation against records produced by deterministic workers | Subprocess |
+| `test_continuation.py` | Execution-control changes, total ceilings, usage-stop approval and recovery | Subprocess |
+| `test_continuation_validation.py` | Recorded execution controls and continuation authorization | Unit |
 | `test_review.py` | Regression probes for output attribution and observed parallel limits | Subprocess |
 | `test_smoke.py` | All-harness manual command defaults, isolation, reuse and failure reporting, with fake CLIs | Subprocess |
 

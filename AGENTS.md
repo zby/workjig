@@ -22,9 +22,10 @@ invocations when making support claims.
 
 ## Rules that are easy to break
 
-- Preserve stable call identity and matching declared request material for
-  reuse. Only complete, atomically committed results are reusable. Delivery
-  does not certify acceptance: workflows rerun checks against the intended
+- Preserve stable call identity and matching declared work material for
+  reuse. Execution controls are not work identity; changing them does not reset
+  spent launch allowances. Only complete, atomically committed results are
+  reusable. Delivery does not certify acceptance: workflows rerun checks against the intended
   input snapshot, using fixed sibling snapshots for parallel checks.
 - Reserve each launch durably before process start. Restart and recovery must
   not refund spent allowances. Unresolved reservations block automatic work
@@ -40,6 +41,11 @@ invocations when making support claims.
   budgets belong to workflow code, not an implicit runtime correction loop.
 - Build on harness public interfaces; do not copy or patch their internals.
 - Keep the implementation small; add only what current work needs.
+- Do not maintain backward compatibility at this unpublished stage, including
+  for public APIs and persisted run records. Do not add compatibility shims,
+  legacy modes, or migrations; update callers and tests to the current contract
+  instead. Reject incompatible record formats clearly rather than silently
+  reinterpreting them. This does not waive approval for API or format changes.
 - Ask before settling open choices in the design, changing the public API or
   record format, using credentials for real model probes, publishing, or
   bumping the version. Do not promote experimental findings into approved

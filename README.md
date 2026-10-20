@@ -31,6 +31,13 @@ clear execution contract. Commonplace drives priorities, but its domain rules
 stay outside the runtime. Workjig requires neither Commonplace nor Git.
 Initial platform: Linux, Python 3.11 or newer.
 
+### Compatibility
+
+Workjig is unpublished and under active development. We do not maintain backward
+compatibility for the public API or persisted run-record format. Changes may
+require updating callers and starting fresh run directories; no migration of
+older records is promised.
+
 ### Code-steered or agent-steered?
 
 Agent-led delegation is useful for exploratory work where the process changes
@@ -86,10 +93,13 @@ with checks, corrections and resume.
 ## Guarantees and boundaries
 
 - **Reuse:** reopening a run reuses committed results only when the stable call
-  identity and declared request match. Ambient environment changes are not
-  detected automatically.
+  identity and declared work match. Timeout, launch ceiling, and retry policy
+  are not part of work identity. Ambient environment changes are not detected
+  automatically.
 - **Bounded execution:** one launch by default; retries and larger allowances
   are explicit. Launches are reserved durably, and restart does not refund them.
+  A caller may raise the total ceiling to continue eligible failed work; usage
+  stops require explicit approval of the particular stop.
 - **Explicit recovery:** unresolved launches block automatic work until you
   establish that the old worker has stopped and acknowledge it.
 - **Delivery is not acceptance:** your workflow checks content and bounds

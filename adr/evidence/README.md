@@ -32,6 +32,9 @@ second runtime or a substitute for maintained tests.
 
 ## Investigations
 
+- [Execution controls](execution-controls/README.md): deterministic implementation
+  checks and pre/post source-size measurements for work identity and continuation.
+
 - [Terminal failures](terminal-failures/README.md): version-scoped Codex,
   Claude Code, and Pi completion signals, quota-related fields, and exit behavior.
   Includes [local-provider probes](terminal-failures/local-probes.md), raw CLI

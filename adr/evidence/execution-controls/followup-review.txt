@@ -1,0 +1,42 @@
+I found no blockers and no remaining concrete defects. I didn't edit any files or call any model APIs.
+
+## Check result
+`uv run pytest tests/test_continuation.py tests/test_continuation_validation.py tests/test_outcomes.py -q` → **94 passed in 4.89s**.
+
+I also tried `ruff check` and `ruff format --check` as extra checks, but the permission mode blocked them, so lint and format are unverified. I didn't run the full suite.
+
+## The invalid-approval fix
+- `src/workjig/run.py:607-619` validates the approval before anything is created. It looks up the history with `.get(...).get(...)`, which adds nothing, and raises `ValueError` if no `usage_limit` launch in that history has the given ID. `_entry` (the `setdefault`) only runs after that, at `:620`.
+- Bad types and empty strings are rejected at `:588-591`, before the lock is taken.
+- `tests/test_continuation.py:221-236` covers a wrong call ID and changed work material. It checks that the record has only `job` (with one history) and `other`. `:212-218` covers `""`, `12` and an unknown ID, and checks that nothing launches.
+
+## Always-serialized `output_protocol`
+- `run.py:61` always writes the field, including `None`.
+- `run.py:83-84` requires exactly that set of fields, and `:98` reads it directly. There is no optional or legacy branch.
+- Record version 2 is required, with a strict int check (`:302-303`). `test_old_record_version_rejected` confirms version 1 is refused. I found no compatibility shims.
+
+## Durable budgets
+- Each reservation stores its timeout, ceiling, retry policy and `resumed_usage_stop` before process start (`:641-656`).
+- When a record is loaded, each launch is checked against the ceiling it was reserved under (`:327-328`). Any continuation must have either the named usage-stop approval for the immediately previous launch, or that launch's status in its own recorded `retry.on` (`:330-344`).
+- Lowering the ceiling stops further work but doesn't invalidate past launches, and raising it gives no refund: `test_extend_ceiling_and_policy_without_refunding`.
+- `test_third_launch_cannot_use_ceiling_two` checks that a third launch can't be recorded under a ceiling of two.
+- A failed reservation write marks the run as unusable (`:693-697`), and on reopen nothing has been spent. `test_approval_reservation_write_failure_does_not_consume_permission` confirms the record is byte-identical, the worker started once, there are no unresolved launches, and the later approved continuation delivers.
+
+## Unresolved-launch recovery
+- The stale-launch check runs before approval validation and again before reserving (`:605`, `:652`).
+- `test_crash_after_approval_reservation_requires_recovery` shows an approved reservation that was never resolved blocks with `UncertainLaunchError` until `acknowledge_stopped` is called. The allowance is not refunded: the history ends up with 3 launches.
+
+## Stop-specific, replay-safe approval
+- An approval only takes effect when the named stop is the latest launch (`:626-630`), and only while allowance remains (`:631`).
+- Repeating an approval after continuation or delivery just replays the result. A new usage stop needs a new approval. Later failures follow the ordinary retry policy.
+- `RETRYABLE_STATUSES` (`models.py:25`) excludes `usage_limit` and `protocol_error`, so neither can be retried through the retry policy.
+- Covered by `test_usage_approval_is_stop_specific_and_replay_safe`, `test_usage_approval_needs_remaining_allowance` and `test_approved_continuation_uses_ordinary_retries`.
+
+## Other new tests
+- **Parallel replay:** `test_parallel_replays_siblings_and_continues_timeout` checks that siblings replay their original launches under changed timeouts while the timed-out sibling continues to a second launch.
+- **Direct record validation:** `test_continuation_validation.py:60-96` covers authorized ordinary continuation (`process_error` in recorded `retry.on`), missing, wrong and non-usage approvals, `protocol_error`, and a ceiling of 1.
+
+## Observations (not defects)
+- The retry backoff also applies before an approved usage continuation (`run.py:635`). `test_approved_continuation_uses_ordinary_retries` asserts this, so it's tested behaviour, but the ADR doesn't say so explicitly.
+- When an unresolved launch exists, an invalid approval raises `UncertainLaunchError` rather than `ValueError`. Recovery stays the first gate, which fits the contract.
+- The ADR status still reads "independent verification pending". Updating it is a separate edit for you to decide on.

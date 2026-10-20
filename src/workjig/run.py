@@ -18,7 +18,15 @@ from pathlib import Path
 from typing import cast
 
 from .harness import launch, prepare
-from .models import FAILURE_STATUSES, CallResult, CommandWorker, LaunchRecord, Request, RetryPolicy
+from .models import (
+    FAILURE_STATUSES,
+    CallResult,
+    CommandWorker,
+    LaunchRecord,
+    Request,
+    RetryPolicy,
+    _positive_number,
+)
 
 
 class RecordError(RuntimeError):
@@ -50,16 +58,8 @@ def _request_material(request: Request) -> dict[str, object]:
             "argv": list(request.worker.argv),
             "env": dict(request.worker.env),
             "evidence_file": request.worker.evidence_file,
-            # Omit the default to preserve canonical identity of existing records.
-            **(
-                {"output_protocol": request.worker.output_protocol}
-                if request.worker.output_protocol is not None
-                else {}
-            ),
+            "output_protocol": request.worker.output_protocol,
         },
-        "timeout_seconds": request.timeout_seconds,
-        "max_launches": request.max_launches,
-        "retry": {"on": list(request.retry.on), "backoff_seconds": request.retry.backoff_seconds},
     }
 
 
@@ -77,21 +77,12 @@ def _validated_request(call_id: str, material: object) -> Request:
         "required_outputs",
         "optional_outputs",
         "worker",
-        "timeout_seconds",
-        "max_launches",
-        "retry",
     }:
         raise RecordError("invalid request material")
     worker = material["worker"]
-    retry = material["retry"]
-    worker_fields = {"name", "argv", "env", "evidence_file"}
-    if not isinstance(worker, dict) or set(worker) not in (
-        worker_fields,
-        worker_fields | {"output_protocol"},
-    ):
+    worker_fields = {"name", "argv", "env", "evidence_file", "output_protocol"}
+    if not isinstance(worker, dict) or set(worker) != worker_fields:
         raise RecordError("invalid worker material")
-    if not isinstance(retry, dict) or set(retry) != {"on", "backoff_seconds"}:
-        raise RecordError("invalid retry material")
     try:
         request = Request(
             call_id=call_id,
@@ -104,11 +95,8 @@ def _validated_request(call_id: str, material: object) -> Request:
                 name=worker["name"],
                 env=worker["env"],
                 evidence_file=worker["evidence_file"],
-                output_protocol=worker.get("output_protocol"),
+                output_protocol=worker["output_protocol"],
             ),
-            timeout_seconds=material["timeout_seconds"],
-            max_launches=material["max_launches"],
-            retry=RetryPolicy(on=tuple(retry["on"]), backoff_seconds=retry["backoff_seconds"]),
         )
     except (KeyError, TypeError, ValueError) as error:
         raise RecordError(f"invalid request material: {error}") from error
@@ -130,6 +118,10 @@ def _attempt_to_dict(attempt: LaunchRecord) -> dict[str, object]:
         "problem": dict(attempt.problem) if attempt.problem is not None else None,
         "evidence": _thaw(attempt.evidence),
         "missing_outputs": list(attempt.missing_outputs),
+        "timeout_seconds": attempt.timeout_seconds,
+        "max_launches": attempt.max_launches,
+        "retry": {"on": list(attempt.retry.on), "backoff_seconds": attempt.retry.backoff_seconds},
+        "resumed_usage_stop": attempt.resumed_usage_stop,
     }
 
 
@@ -156,9 +148,28 @@ def _attempt_from_dict(value: object) -> LaunchRecord:
         "problem",
         "evidence",
         "missing_outputs",
+        "timeout_seconds",
+        "max_launches",
+        "retry",
+        "resumed_usage_stop",
     }
     if set(value) != fields:
         raise RecordError("invalid attempt fields")
+    try:
+        timeout = _positive_number(value["timeout_seconds"], "timeout_seconds")
+        retry = value["retry"]
+        if not isinstance(retry, dict) or set(retry) != {"on", "backoff_seconds"}:
+            raise ValueError("invalid retry fields")
+        if not isinstance(retry["on"], list):
+            raise ValueError("invalid retry outcomes")
+        policy = RetryPolicy(tuple(retry["on"]), retry["backoff_seconds"])
+        if type(value["max_launches"]) is not int or value["max_launches"] < 1:
+            raise ValueError("invalid launch ceiling")
+        stop = value["resumed_usage_stop"]
+        if stop is not None and (not isinstance(stop, str) or not stop):
+            raise ValueError("invalid usage stop reference")
+    except (TypeError, ValueError) as error:
+        raise RecordError(f"invalid launch controls: {error}") from error
     for field in ("launch_id", "launch_dir"):
         if not isinstance(value[field], str) or not value[field]:
             raise RecordError(f"invalid attempt {field}")
@@ -217,7 +228,6 @@ def _attempt_from_dict(value: object) -> LaunchRecord:
         raise RecordError("invalid attempt missing_outputs")
 
     # These invariants correspond to harness.launch and acknowledge_stopped.
-    # Classification changes must also keep previously valid records readable.
     pid, returncode = value["pid"], value["returncode"]
     started, finished = value["started_at"], value["finished_at"]
     if status in {"reserved", "running"}:
@@ -274,14 +284,23 @@ def _attempt_from_dict(value: object) -> LaunchRecord:
             valid = valid and problem is not None and problem["kind"] == "unable"
     if not valid:
         raise RecordError(f"inconsistent {status} attempt")
-    return LaunchRecord(**{**value, "argv": tuple(argv), "missing_outputs": tuple(missing)})
+    return LaunchRecord(
+        **{
+            **value,
+            "argv": tuple(argv),
+            "missing_outputs": tuple(missing),
+            "timeout_seconds": timeout,
+            "retry": policy,
+        }
+    )
 
 
 def _validate_state(state: object) -> dict[str, object]:
     if (
         not isinstance(state, dict)
         or set(state) != {"version", "workdir", "calls"}
-        or state.get("version") != 1
+        or type(state.get("version")) is not int
+        or state["version"] != 2
         or not isinstance(state.get("workdir"), str)
         or not isinstance(state.get("calls"), dict)
     ):
@@ -301,13 +320,28 @@ def _validate_state(state: object) -> dict[str, object]:
             if not isinstance(attempts, list):
                 raise RecordError("attempts must be a list")
             parsed = [_attempt_from_dict(attempt) for attempt in attempts]
-            if len(parsed) > request.max_launches:
-                raise RecordError("launch allowance exceeded in record")
             if any(
                 attempt.status in {"reserved", "running", "delivered"} for attempt in parsed[:-1]
             ):
                 raise RecordError("invalid attempt order")
-            for attempt in parsed:
+            for index, attempt in enumerate(parsed):
+                if index >= attempt.max_launches:
+                    raise RecordError("launch allowance exceeded in record")
+                previous = parsed[index - 1] if index else None
+                if attempt.resumed_usage_stop is not None:
+                    if (
+                        previous is None
+                        or previous.status != "usage_limit"
+                        or attempt.resumed_usage_stop != previous.launch_id
+                    ):
+                        raise RecordError("invalid usage continuation")
+                if previous is not None and (
+                    (previous.status == "usage_limit" and attempt.resumed_usage_stop is None)
+                    or (
+                        previous.status != "usage_limit" and previous.status not in attempt.retry.on
+                    )
+                ):
+                    raise RecordError("unauthorized continuation")
                 if not set(attempt.missing_outputs) <= set(request.required_outputs):
                     raise RecordError("attempt names undeclared missing outputs")
                 if attempt.launch_id in all_launch_ids:
@@ -400,7 +434,7 @@ class Run:
                         "confirm any old workers have stopped, and start a new run in a "
                         "fresh directory with deliberately chosen launch allowances"
                     )
-                self._state = {"version": 1, "workdir": str(self.workdir), "calls": {}}
+                self._state = {"version": 2, "workdir": str(self.workdir), "calls": {}}
                 self._write_state()
             (self.record_dir / "launches").mkdir(exist_ok=True)
             self._lock_file = lock_file
@@ -542,10 +576,19 @@ class Run:
             reused=reused,
         )
 
-    def call(self, request: Request) -> CallResult:
-        """Run or replay one call, respecting persisted launch allowance."""
+    def call(self, request: Request, *, resume_usage_stop: str | None = None) -> CallResult:
+        """Run or replay work; optionally approve continuation of one usage stop.
+
+        Approval names a usage-limit launch in this exact call history. Repeating
+        approval after continuation or delivery is harmless. New usage stops
+        require new approval, and all launches still spend the total allowance.
+        """
         if not isinstance(request, Request):
             raise TypeError("request must be a Request")
+        if resume_usage_stop is not None and (
+            not isinstance(resume_usage_stop, str) or not resume_usage_stop
+        ):
+            raise ValueError("resume_usage_stop must be a nonempty launch ID")
         material = _request_material(request)
         request_hash = _hash(material)
         with self._mutex:
@@ -560,15 +603,33 @@ class Run:
                 with self._mutex:
                     self._ensure_open()
                     self._assert_no_stale_launches()
+                    assert self._state is not None
+                    entry = self._state["calls"].get(request.call_id, {}).get(request_hash)
+                    prior = (
+                        tuple(_attempt_from_dict(value) for value in entry["attempts"])
+                        if entry is not None
+                        else ()
+                    )
+                    if resume_usage_stop is not None and not any(
+                        a.launch_id == resume_usage_stop and a.status == "usage_limit"
+                        for a in prior
+                    ):
+                        raise ValueError(
+                            "resume_usage_stop must name a usage stop in this call history"
+                        )
                     entry = self._entry(request.call_id, request_hash, material)
                     if entry["result"] is not None:
                         return self._result(request, request_hash, entry, reused=True)
-                    prior = tuple(_attempt_from_dict(value) for value in entry["attempts"])
+                    approved_stop = None
                     if prior:
                         previous = prior[-1]
                         if (
-                            len(prior) >= request.max_launches
-                            or previous.status not in request.retry.on
+                            previous.status == "usage_limit"
+                            and previous.launch_id == resume_usage_stop
+                        ):
+                            approved_stop = resume_usage_stop
+                        if len(prior) >= request.max_launches or (
+                            previous.status not in request.retry.on and approved_stop is None
                         ):
                             return self._result(request, request_hash, entry, reused=True)
                 if prior and request.retry.backoff_seconds:
@@ -578,7 +639,14 @@ class Run:
                 launch_dir.mkdir()
                 paths, argv = prepare(request, launch_dir, self.workdir)
                 reserved = LaunchRecord(
-                    launch_id=launch_id, status="reserved", launch_dir=str(launch_dir), argv=argv
+                    launch_id=launch_id,
+                    status="reserved",
+                    launch_dir=str(launch_dir),
+                    argv=argv,
+                    timeout_seconds=request.timeout_seconds,
+                    max_launches=request.max_launches,
+                    retry=request.retry,
+                    resumed_usage_stop=approved_stop,
                 )
                 with self._mutex:
                     self._assert_no_stale_launches()

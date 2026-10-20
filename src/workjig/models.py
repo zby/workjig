@@ -192,6 +192,10 @@ class LaunchRecord:
     problem: Mapping[str, str] | None = None
     evidence: Mapping[str, object] | None = None
     missing_outputs: tuple[str, ...] = ()
+    timeout_seconds: float = 300.0
+    max_launches: int = 1
+    retry: RetryPolicy = field(default_factory=RetryPolicy)
+    resumed_usage_stop: str | None = None
 
     def __post_init__(self) -> None:
         if self.argv is not None:
@@ -207,6 +211,8 @@ class LaunchRecord:
 class CallResult:
     """Call outcome; failed_at_launch_limit means failed with all launches spent.
 
+    request_hash identifies work material, excluding execution controls.
+    The limit flag uses the ceiling supplied to the current call.
     A false value does not imply retryability or remaining launch allowance.
     """
 

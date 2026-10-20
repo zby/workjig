@@ -48,12 +48,22 @@ when a call retries.
 ## Resume and corrections
 
 Reopen the same run directory and repeat the same call to reuse a committed
-result. Both the stable call identity and declared request must match.
-Different identities request independent work even when their prompts match.
+result. Both the stable `call_id` and declared work material must match: task,
+inputs, required and optional outputs, and worker configuration. Timeout, launch
+ceiling, and retry policy are execution controls, not work identity. Changing
+them replays delivered answers and applies the new controls only to future
+launches. `CallResult.request_hash` hashes the work material, excluding these
+controls. Different identities request independent work even when prompts match.
 
-The caller must keep the surrounding environment compatible with reuse.
-Changing ambient files, tools or workflow logic may require a new run. The
-runtime does not infer those dependencies, pin code or manage environments.
+Resume is an exceptional recovery path for unchanged workflow and runtime
+code, not a way to continue old runs after code changes. If workflow or runtime
+code changes, start a fresh run directory and rerun the whole workflow. Migration
+of old runs across code changes is out of scope.
+
+The caller must also keep the surrounding environment compatible with reuse.
+Changing ambient files or tools may require a new run. The runtime does not
+infer those dependencies, pin code or manage environments. Starting fresh does
+not undo earlier worker effects; the caller still owns their recovery.
 
 Check delivered content in your workflow. For a correction, create a new call
 with a stable identity for that correction, previous content and findings as
@@ -62,8 +72,15 @@ check; delivery does not certify acceptance. Use fixed sibling snapshots for
 checks whose answer depends on other parallel results.
 
 The default is one physical launch. Larger limits and execution retry policy
-must be explicit. Each launch reservation spends an allowance before process
-start. Restarting does not refund consumed allowances. An unresolved launch
+must be explicit. `max_launches` is a total ceiling for this call history: raising
+it from two to three after two spent launches permits at most one more launch.
+The latest failure must also be selected by the currently supplied retry policy;
+its backoff applies before resumed retries too. Raising timeout alone grants
+neither allowance nor retry permission. A lower ceiling prevents launches once
+reached, but does not invalidate history. Each launch reservation spends an
+allowance before process start. Restarting does not refund consumed allowances.
+`LaunchRecord.timeout_seconds`, `max_launches`, and `retry` retain the effective
+controls recorded before process start. An unresolved launch
 reservation blocks automatic work: establish that the old worker has stopped
 before acknowledging it with `acknowledge_stopped`. This operation records
 your assertion; it cannot prove that the old process is gone.
@@ -132,6 +149,28 @@ handles Pi's exit-zero failures. Earlier errors followed by successful recovery
 and ordinary stdout/stderr quotations do not trigger usage stops. The harness
 owns short retries; after it gives up, the workflow decides what happens next.
 
+To explicitly continue after a usage stop, supply its launch ID:
+
+```python
+from dataclasses import replace
+
+continued = run.call(
+    replace(request, max_launches=3),  # Total ceiling, not three extra launches.
+    resume_usage_stop=stopped_result.launches[-1].launch_id,
+)
+```
+
+Approval must name a committed `usage_limit` launch in this exact call history;
+malformed, unknown, wrong-entry, or non-usage references raise `ValueError`.
+Approval only overrides that stop when it is the latest launch and allowance
+remains. The next reservation records the stop ID as
+`LaunchRecord.resumed_usage_stop`. Repeating approval after continuation or
+delivery is harmless; a later usage stop requires new approval. Other subsequent
+failures follow ordinary retry policy. This does not enable `usage_limit` in
+`RetryPolicy` or bypass unresolved-launch recovery. The current backoff also
+applies before an approved usage continuation. Stop approval is available on
+`run.call`, not `run.parallel`; continue usage-stopped calls individually.
+
 For a selected output protocol, other terminal failures and malformed or missing
 completion evidence become `process_error`, subject to explicit bounded retry.
 Unknown provider errors are not universally recognized as quota stops. A generic
@@ -153,9 +192,9 @@ An uncertain launch raises `UncertainLaunchError` before new work starts.
 Inspect `run.unresolved_launches()`, establish that the old worker and its
 children have stopped, then call `run.acknowledge_stopped(launch_id)`. To allow
 a subsequent launch, the original request must have remaining allowance and
-an explicit retry policy including `interrupted`. Otherwise start a new run
-deliberately. Changing execution policy or limits changes declared request
-identity; it is not a way to continue the original call's budget.
+an explicit retry policy including `interrupted`. The caller may increase the
+total ceiling and update retry policy to authorize continuation, but already
+spent launches remain spent. Otherwise start a new run deliberately.
 
 Corrupt records raise `RecordError`. A persistence failure can poison the
 current controller: close and reopen it before inspection or recovery. Never

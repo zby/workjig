@@ -1,0 +1,43 @@
+The full test suite passes (272 tests). I found no blockers. I did not run ruff or the build because the combined check command was denied. The findings below come from reading the code and diff.
+
+# Verification: execution-control separation and usage-stop continuation
+
+## Checks run
+- `uv run pytest -q`: **272 passed** in 37.8 s.
+- **Not run:** `uv sync --locked`, `uv run ruff check .`, `uv run ruff format --check .` and `uv build`. The permission mode denied the command that combined them, and I didn't retry outside the scope you set. Someone needs to run these before acceptance.
+- No files were edited and no real model APIs were used.
+
+## Verdict
+**No blockers.** Each binding constraint holds in the code:
+- **No refunds:** every check counts all recorded launches against the supplied ceiling (`run.py:632`, `run.py:690`).
+- **Recorded ceilings respected:** when a record is loaded, each launch is checked against its own recorded ceiling (`run.py:335`), so lowering the ceiling later doesn't invalidate history.
+- **Unresolved launches block work:** this is checked before approval or any other decision (`run.py:603`, `612`, `653`).
+- **Approval is tied to the latest stop:** it only takes effect when the named stop is the latest launch (`run.py:627-631`). A later usage stop has no retry path, because `usage_limit` can't appear in a retry policy (`models.py:26`).
+- **Approval is replay-safe:** the stop ID is recorded in the next reservation before the process starts. On load, every later launch must be either an approved continuation of that exact stop or allowed by its own recorded retry policy (`run.py:338-351`).
+- **Recorded controls survive:** the harness only modifies the reserved record (`harness.py:147`, `242`), and acknowledgment does the same (`run.py:545`), so the recorded controls are never reset to defaults.
+- **Old records are rejected:** version 1 records fail clearly.
+
+The launch path, process cleanup and parallel settlement are unchanged.
+
+## Findings, in priority order
+
+**1. (Should fix, small) A rejected approval can leave an empty call entry in the record.** At `run.py:613`, `self._entry(...)` uses `setdefault`, so it creates `{"attempts": [], "result": None}` in memory before the approval check raises `ValueError` at `run.py:619`. This happens on both the wrong-entry path and the new-call path. The next state write by any other call then saves that empty entry. It still loads correctly and is harmless, but a rejected request ends up changing the durable record. **Fix:** look up the entry without creating it (e.g. `calls.get(call_id, {}).get(request_hash)`), check the approval against that, and only call `_entry` after the check passes. **Test:** after an invalid approval followed by a call to a different `call_id`, `run.json` should contain no entry for the rejected call or hash.
+
+**2. (Optional) Parallel calls can't carry an approval.** `parallel()` (`run.py:703-717`) has no way to pass `resume_usage_stop`. Changed controls work in parallel groups, but a usage-stopped call inside a group has to be continued with a separate `run.call`. This is consistent with the ADR's "smallest API", but Commonplace should confirm it's acceptable. It's a design choice for you, not a defect, so I haven't proposed an API change.
+
+**3. (Optional, docs) Backoff also runs before an approved usage continuation.** `run.py:636` sleeps whenever there is earlier history and `retry.backoff_seconds` is non-zero. `test_approved_continuation_uses_ordinary_retries` relies on this (`sleeps == [0.01, 0.01]`). It's reasonable, but `docs/usage.md` only mentions backoff for "resumed retries". One sentence in the usage-stop section would cover it.
+
+**4. (Optional) `LaunchRecord` defaults for the new fields** (`models.py:195-198`: 300 s, ceiling 1, default `RetryPolicy`) would silently produce wrong values if some future construction path forgot to pass them. Only `run.py:642` and the loader construct records today, so nothing is wrong now. Making these keyword-only with no default would turn that mistake into an error, but it changes the public dataclass, so it needs your approval.
+
+**5. (Optional, no-compat cleanup)** `_request_material` still leaves `output_protocol` out when it is `None` (`run.py:61-65`), and `_validated_request` accepts both worker shapes (`run.py:85-88`). The comment justifying this was removed, and version 2 rejects all old records anyway, so this is now an unexplained leftover compatibility path. Always including the key would simplify validation. It's out of scope for this change and fine to defer.
+
+**6. (Docs)**
+- `adr/evidence/execution-policy-and-continuation-proposal.md:3` still says "not approved or implemented". Mark it as the historical proposal that ADR 003 implemented.
+- `adr/evidence/execution-controls/README.md` still says verification is "pending". Record this review and the outstanding ruff/build results there.
+
+## Test coverage gaps (optional, ranked)
+1. **Crash during the approval step:** nothing tests a controller that crashes or hits a persistence failure after approval but before the reservation is written (e.g. `_write_state` raising inside the reservation block). The expected outcome is that the controller is poisoned, nothing is spent after reopening, and the same approval still works. This follows from existing behavior, but the proposal lists crash boundaries for approval as an acceptance item.
+2. **Unit test for an authorized ordinary continuation:** `test_history_requires_allowance_and_appropriate_authorization` has no positive non-usage case, e.g. a `process_error` followed by a launch whose recorded retry includes it. It is covered indirectly by reopening in the subprocess tests.
+3. **A recorded ceiling lower than the history length:** e.g. three launches where the third records a ceiling of 2. The loader rejects this (`run.py:335`), but only the case with one prior launch is tested directly.
+4. **The proposal's own parallel example** (A and B replay, C continues with a longer timeout, a ceiling of 2 and `timeout` in its retry policy, run through `parallel()`) has no test.
+5. **The empty-entry case from finding 1** has no test.

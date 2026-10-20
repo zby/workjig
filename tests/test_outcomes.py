@@ -335,7 +335,7 @@ def test_output_protocol_is_declared_identity(tmp_path):
     assert first.launches[0].launch_id != second.launches[0].launch_id
     state = json.loads((tmp_path / "records/run.json").read_text())
     entries = state["calls"]["job"]
-    assert "output_protocol" not in entries[first.request_hash]["request"]["worker"]
+    assert entries[first.request_hash]["request"]["worker"]["output_protocol"] is None
     assert entries[second.request_hash]["request"]["worker"]["output_protocol"] == "pi-json"
     with Run(tmp_path / "records", tmp_path) as run:
         assert run.call(req).reused
@@ -343,7 +343,7 @@ def test_output_protocol_is_declared_identity(tmp_path):
 
 
 @pytest.mark.subprocess
-def test_old_record_outcome_is_not_reclassified(tmp_path):
+def test_committed_outcome_is_not_reclassified(tmp_path):
     req = request(None, "usage limit", code=7)
     records = tmp_path / "records"
     with Run(records, tmp_path) as run:
@@ -351,8 +351,8 @@ def test_old_record_outcome_is_not_reclassified(tmp_path):
     path = records / "run.json"
     state = json.loads(path.read_text())
     entry = state["calls"][req.call_id][first.request_hash]
-    assert "output_protocol" not in entry["request"]["worker"]
-    # This models a valid v1 record emitted under the old raw-log policy.
+    assert entry["request"]["worker"]["output_protocol"] is None
+    # A committed outcome replays without running today's log classifier again.
     entry["attempts"][0]["status"] = "usage_limit"
     path.write_text(json.dumps(state))
     original = path.read_bytes()
