@@ -43,8 +43,9 @@ Use uv: `uv sync --locked`, `uv run pytest`, `uv run ruff check .`,
 `uv run ruff format --check .`, `uv build`. All must pass, without blanket
 skips. The [README](README.md#development) documents development commands;
 the initial platform is Linux with Python 3.11 or newer. Missing prerequisites
-are failures, not automatic skips. Verify from a fresh environment, not an old
-editable install.
+are failures, not automatic skips. Use the existing development environment for
+routine checks; an editable install is fine. Use a fresh environment when
+testing built distributions, installing the artifact rather than the source tree.
 
 Tests are functional: run real subprocesses with deterministic worker fixtures,
 never a real model API in the normal test suite. Use owned processes and isolated

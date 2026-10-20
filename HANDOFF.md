@@ -53,8 +53,10 @@ If a change needs any of these to bend, stop and report the conflict instead.
 ## Work in order
 
 1. Read `AGENTS.md`, `README.md`, `docs/design.md` and
-   `docs/harness-evidence.md`; run the checks in `AGENTS.md` from a fresh
-   `uv sync --locked` and record the result before changing anything.
+   `docs/harness-evidence.md`; run the checks in `AGENTS.md` in the existing
+   development environment after `uv sync --locked` and record the result
+   before changing anything. Reserve fresh environments for testing built
+   distributions.
 2. Usage-limit classification. Today a provider quota error in a harness's
    raw output is a `process_error` and is retried under the retry policy. The
    messages observed in the installed harnesses are "Usage limit reached"
