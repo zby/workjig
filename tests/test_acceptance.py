@@ -371,11 +371,11 @@ def test_launch_allowance_remains_spent_after_restart(command_script: Path, tmp_
     with Run(tmp_path / "records", tmp_path) as run:
         first = run.call(call)
     assert first.status == "process_error"
-    assert first.exhausted
+    assert first.failed_at_launch_limit
     assert len(first.attempts) == 2
     with Run(tmp_path / "records", tmp_path) as run:
         resumed = run.call(call)
-    assert resumed.exhausted
+    assert resumed.failed_at_launch_limit
     assert len([e for e in events(log) if e["event"] == "start"]) == 2
 
 

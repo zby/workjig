@@ -40,7 +40,7 @@ def test_successful_retry_without_output_cannot_adopt_failed_output(tmp_path: Pa
     assert result.status == "incomplete"
     assert not result.outputs
     assert [attempt.status for attempt in result.attempts] == ["process_error", "incomplete"]
-    assert result.exhausted
+    assert result.failed_at_launch_limit
 
 
 def test_parallel_limit_bounds_observed_live_worker_count(tmp_path: Path):

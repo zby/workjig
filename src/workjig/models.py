@@ -194,12 +194,17 @@ class Attempt:
 
 @dataclass(frozen=True)
 class CallResult:
+    """Call outcome; failed_at_launch_limit means failed with all launches spent.
+
+    A false value does not imply retryability or remaining launch allowance.
+    """
+
     call_id: str
     request_hash: str
     status: str
     outputs: Mapping[str, str]
     attempts: tuple[Attempt, ...]
-    exhausted: bool
+    failed_at_launch_limit: bool
     reused: bool = False
 
     def __post_init__(self) -> None:

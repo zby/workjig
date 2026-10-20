@@ -97,12 +97,15 @@ def _read_problem(path: Path) -> tuple[dict[str, str] | None, bool]:
         return None, True
     if not path.exists():
         return None, False
+    if not path.is_file():
+        return None, True
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError):
         return None, True
     if (
         not isinstance(value, dict)
+        or not isinstance(value.get("kind"), str)
         or value.get("kind") not in {"unable", "usage_limit"}
         or not isinstance(value.get("message"), str)
     ):
@@ -111,11 +114,14 @@ def _read_problem(path: Path) -> tuple[dict[str, str] | None, bool]:
 
 
 def _read_evidence(path: Path) -> Mapping[str, object] | None:
-    if not path.exists() or path.is_symlink():
+    if path.is_symlink() or not path.is_file():
         return None
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError):
+        # Optional metadata must fit the same strict JSON format as run records.
+        # This also rejects overflowing numeric literals and nested nonfinite values.
+        json.dumps(value, allow_nan=False)
+    except (OSError, UnicodeError, ValueError):
         return None
     return value if isinstance(value, dict) else None
 

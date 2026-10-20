@@ -527,7 +527,7 @@ class Run:
             status=status,
             outputs=outputs,
             attempts=attempts,
-            exhausted=status != "delivered" and len(attempts) >= request.max_launches,
+            failed_at_launch_limit=status != "delivered" and len(attempts) >= request.max_launches,
             reused=reused,
         )
 
