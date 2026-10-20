@@ -1,8 +1,9 @@
 # Workjig
 
-A standalone Python runtime for workflows that run headless LLM coding
-harnesses such as Claude Code, Codex and Pi as subprocess workers.
-You write the workflow in Python; Workjig handles launches, separate output
+A Python workflow runtime that orchestrates headless LLM harnesses.
+
+Run Claude Code, Codex and Pi as subprocess workers. You write the workflow
+in Python; Workjig handles launches, separate output
 paths, bounded execution and durable run records.
 
 ## Why Workjig?
@@ -122,3 +123,7 @@ Normal tests use direct parser checks and deterministic subprocess workers;
 they do not call model APIs or require credentials. Real-harness probes are
 [separate, deliberate operations](docs/usage.md#examples-and-real-harness-probes).
 Building creates local artifacts; publishing is a separate step.
+
+## License
+
+[MIT](LICENSE).
