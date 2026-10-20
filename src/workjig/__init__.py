@@ -1,10 +1,10 @@
 """Local headless worker calls with durable, run-scoped results."""
 
-from .models import Attempt, CallResult, CommandWorker, Request, RetryPolicy
+from .models import CallResult, CommandWorker, LaunchRecord, Request, RetryPolicy
 from .run import RecordError, Run, RunBusyError, UncertainLaunchError
 
 __all__ = [
-    "Attempt",
+    "LaunchRecord",
     "CallResult",
     "CommandWorker",
     "RecordError",

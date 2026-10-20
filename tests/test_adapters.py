@@ -213,7 +213,7 @@ def test_claude_smoke_script_with_deterministic_executable(tmp_path: Path):
     )
     result = json.loads(completed.stdout)
     assert result["status"] == "delivered"
-    assert result["attempts"] == 1
+    assert result["launches"] == 1
     assert result["reused"] is True
     assert result["evidence"]["model_usage"] == {"synthetic-haiku": {"inputTokens": 5}}
     assert (workdir / "launches").read_text() == "launch\n"

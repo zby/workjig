@@ -48,9 +48,9 @@ def main() -> None:
             raise SystemExit(1)
         assert result.outputs["answer.txt"] == request.inputs["source.txt"]
         repeated = run.call(request)
-        assert repeated.reused and len(repeated.attempts) == len(result.attempts)
-        assert repeated.attempts[-1].launch_id == result.attempts[-1].launch_id
-    attempt = result.attempts[-1]
+        assert repeated.reused and len(repeated.launches) == len(result.launches)
+        assert repeated.launches[-1].launch_id == result.launches[-1].launch_id
+    attempt = result.launches[-1]
     evidence = parse_evidence(
         args.harness,
         (Path(attempt.launch_dir) / "stdout.log").read_text(encoding="utf-8"),
@@ -61,7 +61,7 @@ def main() -> None:
                 "harness": args.harness,
                 "requested_model": args.model,
                 "status": result.status,
-                "attempts": len(result.attempts),
+                "launches": len(result.launches),
                 "reused": repeated.reused,
                 "records": str(workdir / "records"),
                 "evidence": evidence,

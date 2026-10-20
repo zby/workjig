@@ -141,7 +141,7 @@ def test_same_material_different_call_ids_launch_independently(
         second = run.call(request("second", worker))
         again = run.call(request("first", worker))
     assert first.status == second.status == again.status == "delivered"
-    assert first.attempts[0].launch_id != second.attempts[0].launch_id
+    assert first.launches[0].launch_id != second.launches[0].launch_id
     assert not first.reused and not second.reused and again.reused
     assert len([e for e in events(log) if e["event"] == "start"]) == 2
 
@@ -173,9 +173,9 @@ def test_failed_partial_output_and_problem_do_not_leak(
         result = run.call(call)
     assert result.status == "delivered"
     assert result.outputs == {"result.txt": "value-"}
-    assert len(result.attempts) == 2
-    assert result.attempts[0].status != "delivered"
-    assert result.attempts[0].launch_dir != result.attempts[1].launch_dir
+    assert len(result.launches) == 2
+    assert result.launches[0].status != "delivered"
+    assert result.launches[0].launch_dir != result.launches[1].launch_dir
     assert len([e for e in events(log) if e["event"] == "start"]) == 2
 
 
@@ -372,7 +372,7 @@ def test_launch_allowance_remains_spent_after_restart(command_script: Path, tmp_
         first = run.call(call)
     assert first.status == "process_error"
     assert first.failed_at_launch_limit
-    assert len(first.attempts) == 2
+    assert len(first.launches) == 2
     with Run(tmp_path / "records", tmp_path) as run:
         resumed = run.call(call)
     assert resumed.failed_at_launch_limit
@@ -394,7 +394,7 @@ def test_missing_output_and_usage_limit_are_explicit(command_script: Path, tmp_p
     assert missing.status == "incomplete"
     assert missing.outputs == {}
     assert limited.status == "usage_limit"
-    assert len(limited.attempts) == 1
+    assert len(limited.launches) == 1
     assert len([e for e in events(log) if e["event"] == "start"]) == 2
 
 
@@ -450,8 +450,8 @@ def test_unresolved_reservation_blocks_resume_until_old_worker_stops(
         run.acknowledge_stopped(unresolved[0].launch_id)
         resumed = run.call(call)
     assert resumed.status == "delivered"
-    assert len(resumed.attempts) == 2
-    assert resumed.attempts[0].launch_dir != resumed.attempts[1].launch_dir
+    assert len(resumed.launches) == 2
+    assert resumed.launches[0].launch_dir != resumed.launches[1].launch_dir
     assert len([e for e in events(log) if e["event"] == "start"]) == 2
 
 
@@ -532,5 +532,5 @@ def test_failed_result_commit_poisoned_controller_until_reopen(
         run.acknowledge_stopped(unresolved[0].launch_id)
         resumed = run.call(call)
     assert resumed.status == "delivered"
-    assert len(resumed.attempts) == 2
+    assert len(resumed.launches) == 2
     assert len([e for e in events(log) if e["event"] == "start"]) == 2

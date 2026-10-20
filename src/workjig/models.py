@@ -169,7 +169,9 @@ class Request:
 
 
 @dataclass(frozen=True)
-class Attempt:
+class LaunchRecord:
+    """One launch reservation and its execution evidence, whether or not it started."""
+
     launch_id: str
     status: str
     launch_dir: str
@@ -203,10 +205,10 @@ class CallResult:
     request_hash: str
     status: str
     outputs: Mapping[str, str]
-    attempts: tuple[Attempt, ...]
+    launches: tuple[LaunchRecord, ...]
     failed_at_launch_limit: bool
     reused: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "outputs", MappingProxyType(dict(self.outputs)))
-        object.__setattr__(self, "attempts", tuple(self.attempts))
+        object.__setattr__(self, "launches", tuple(self.launches))

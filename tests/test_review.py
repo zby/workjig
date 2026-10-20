@@ -39,7 +39,7 @@ def test_successful_retry_without_output_cannot_adopt_failed_output(tmp_path: Pa
         result = run.call(request)
     assert result.status == "incomplete"
     assert not result.outputs
-    assert [attempt.status for attempt in result.attempts] == ["process_error", "incomplete"]
+    assert [launch.status for launch in result.launches] == ["process_error", "incomplete"]
     assert result.failed_at_launch_limit
 
 

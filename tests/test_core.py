@@ -87,12 +87,12 @@ def test_lingering_child_usage_precedence_and_replay(tmp_path: Path, report: str
         result = run.call(request)
     assert result.status == ("process_error" if report == "none" else "usage_limit")
     assert result.outputs == {}
-    assert len(result.attempts) == 1
+    assert len(result.launches) == 1
     with Run(records, tmp_path) as run:
         replay = run.call(request)
     assert replay.reused
     assert replay.status == result.status
-    assert replay.attempts == result.attempts
+    assert replay.launches == result.launches
 
 
 def test_protocol_names_are_safe_inside_input_and_output_directories(tmp_path: Path) -> None:
@@ -154,7 +154,7 @@ def test_cooperative_timeout_commits_timeout_even_after_exit_zero(tmp_path: Path
     with Run(tmp_path / "records", tmp_path) as run:
         result = run.call(request)
     assert result.status == "timeout"
-    assert result.attempts[0].returncode == 0
+    assert result.launches[0].returncode == 0
     assert result.outputs == {}
     assert stopped.read_text() == "clean shutdown"
     with Run(tmp_path / "records", tmp_path) as run:
@@ -235,9 +235,9 @@ def test_raw_usage_limit_classification_and_resume(
         result = run.call(request)
     count = 2 if expected == "process_error" else 1
     assert result.status == expected
-    assert len(result.attempts) == count
+    assert len(result.launches) == count
     assert result.outputs == ({"result.txt": "candidate"} if expected == "delivered" else {})
-    for attempt in result.attempts:
+    for attempt in result.launches:
         assert attempt.returncode == exit_code
         assert (Path(attempt.launch_dir) / f"{stream}.log").read_bytes() == (
             b"\xff" + message.encode()
@@ -245,7 +245,7 @@ def test_raw_usage_limit_classification_and_resume(
     with Run(records, tmp_path) as run:
         resumed = run.call(request)
     assert resumed.status == expected
-    assert len(resumed.attempts) == count
+    assert len(resumed.launches) == count
     assert (tmp_path / "launches").read_text().splitlines() == ["launch"] * count
 
 
@@ -256,9 +256,9 @@ def test_timeout_is_not_classified_as_usage_limit(tmp_path: Path, message: str) 
     with Run(tmp_path / "records", tmp_path) as run:
         result = run.call(_request(_worker(script), timeout=0.5))
     assert result.status == "timeout"
-    assert len(result.attempts) == 1
-    assert result.attempts[0].returncode != 0
-    assert (Path(result.attempts[0].launch_dir) / "stdout.log").read_text() == message + "\n"
+    assert len(result.launches) == 1
+    assert result.launches[0].returncode != 0
+    assert (Path(result.launches[0].launch_dir) / "stdout.log").read_text() == message + "\n"
 
 
 @pytest.mark.parametrize("leader_exits", [False, True])
@@ -403,8 +403,8 @@ def test_acknowledgment_spends_prelaunch_reservation_and_blocks_other_ids(tmp_pa
         run.acknowledge_stopped(unresolved[0].launch_id)
         delivered = run.call(call)
     assert delivered.status == "delivered"
-    assert len(delivered.attempts) == 2
-    assert delivered.attempts[0].status == "interrupted"
+    assert len(delivered.launches) == 2
+    assert delivered.launches[0].status == "interrupted"
 
 
 def test_completed_record_survives_exit_after_atomic_commit(tmp_path: Path) -> None:

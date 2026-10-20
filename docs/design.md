@@ -5,6 +5,9 @@ workers. It does not schedule a declarative graph or ask an agent to advance
 a step program. Calls return delivered files and execution evidence; the
 workflow decides whether their contents are acceptable and what to do next.
 
+See [design rationale](design-rationale.md) for the reasons behind these
+boundaries, accepted tradeoffs and conditions for revisiting them.
+
 ## Purpose
 
 The primary use case is the runtime foundation for Commonplace's workflow

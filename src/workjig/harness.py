@@ -13,7 +13,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
-from .models import Attempt, Request
+from .models import LaunchRecord, Request
 
 
 def _now() -> str:
@@ -143,9 +143,9 @@ def launch(
     workdir: Path,
     paths: Mapping[str, Path],
     argv: tuple[str, ...],
-    reserved: Attempt,
+    reserved: LaunchRecord,
     on_started: Callable[[int, tuple[str, ...], str], None],
-) -> tuple[Attempt, dict[str, str]]:
+) -> tuple[LaunchRecord, dict[str, str]]:
     """Invoke once, terminate its process group, then collect only its outputs."""
     started_at = _now()
     stdout_path = Path(reserved.launch_dir) / "stdout.log"
@@ -153,7 +153,7 @@ def launch(
     env = os.environ.copy()
     env.update(request.worker.env)
 
-    def launch_error(error: OSError) -> tuple[Attempt, dict[str, str]]:
+    def launch_error(error: OSError) -> tuple[LaunchRecord, dict[str, str]]:
         return (
             replace(
                 reserved,

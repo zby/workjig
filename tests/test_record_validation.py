@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from workjig import CommandWorker, RecordError, Request, Run
+from workjig import CommandWorker, LaunchRecord, RecordError, Request, Run
 
 
 @pytest.fixture
@@ -32,6 +32,20 @@ def completed_record(tmp_path: Path):
     state = json.loads(original)
     entry = next(iter(state["calls"]["job"].values()))
     return path, original, state, entry, request
+
+
+def test_launch_records_keep_version_one_storage_format(completed_record):
+    path, original, state, entry, request = completed_record
+    assert state["version"] == 1
+    assert "attempts" in entry and "launches" not in entry
+    with Run(path.parent, path.parent.parent) as run:
+        result = run.call(request)
+    assert result.reused
+    assert len(result.launches) == 1
+    assert isinstance(result.launches[0], LaunchRecord)
+    assert result.launches[0].launch_id == entry["attempts"][0]["launch_id"]
+    assert path.read_text() == original
+    assert (path.parent.parent / "starts").read_text() == "start\n"
 
 
 @pytest.mark.parametrize(
@@ -177,9 +191,9 @@ def test_emitted_terminal_records_reopen_without_another_launch(tmp_path: Path, 
         replayed = run.call(request)
     assert replayed.reused
     assert replayed.status == status
-    assert replayed.attempts == result.attempts
+    assert replayed.launches == result.launches
     if status != "launch_error":
         assert (tmp_path / "starts").read_text() == "start\n"
-        assert replayed.attempts[0].evidence["model"] == "synthetic"
+        assert replayed.launches[0].evidence["model"] == "synthetic"
     if status == "timeout":
-        assert replayed.attempts[0].returncode < 0
+        assert replayed.launches[0].returncode < 0

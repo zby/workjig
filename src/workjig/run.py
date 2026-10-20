@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import cast
 
 from .harness import launch, prepare
-from .models import FAILURE_STATUSES, Attempt, CallResult, CommandWorker, Request, RetryPolicy
+from .models import FAILURE_STATUSES, CallResult, CommandWorker, LaunchRecord, Request, RetryPolicy
 
 
 class RecordError(RuntimeError):
@@ -32,7 +32,7 @@ class RunBusyError(RuntimeError):
 class UncertainLaunchError(RuntimeError):
     """A prior launch may still be running; explicit recovery is required."""
 
-    def __init__(self, launches: Iterable[Attempt]) -> None:
+    def __init__(self, launches: Iterable[LaunchRecord]) -> None:
         self.launches = tuple(launches)
         super().__init__(
             "unresolved launch reservation(s): " + ", ".join(a.launch_id for a in self.launches)
@@ -106,7 +106,7 @@ def _validated_request(call_id: str, material: object) -> Request:
     return request
 
 
-def _attempt_to_dict(attempt: Attempt) -> dict[str, object]:
+def _attempt_to_dict(attempt: LaunchRecord) -> dict[str, object]:
     return {
         "launch_id": attempt.launch_id,
         "status": attempt.status,
@@ -130,7 +130,7 @@ def _thaw(value: object) -> object:
     return value
 
 
-def _attempt_from_dict(value: object) -> Attempt:
+def _attempt_from_dict(value: object) -> LaunchRecord:
     if not isinstance(value, dict):
         raise RecordError("attempt is not an object")
     fields = {
@@ -263,7 +263,7 @@ def _attempt_from_dict(value: object) -> Attempt:
             valid = valid and problem is not None and problem["kind"] == "unable"
     if not valid:
         raise RecordError(f"inconsistent {status} attempt")
-    return Attempt(**{**value, "argv": tuple(argv), "missing_outputs": tuple(missing)})
+    return LaunchRecord(**{**value, "argv": tuple(argv), "missing_outputs": tuple(missing)})
 
 
 def _validate_state(state: object) -> dict[str, object]:
@@ -452,7 +452,7 @@ class Run:
             request_hash, {"request": material, "attempts": [], "result": None}
         )
 
-    def unresolved_launches(self) -> tuple[Attempt, ...]:
+    def unresolved_launches(self) -> tuple[LaunchRecord, ...]:
         """Return reservations not settled by a durable completion record."""
         with self._mutex:
             self._ensure_open()
@@ -526,7 +526,7 @@ class Run:
             request_hash=request_hash,
             status=status,
             outputs=outputs,
-            attempts=attempts,
+            launches=attempts,
             failed_at_launch_limit=status != "delivered" and len(attempts) >= request.max_launches,
             reused=reused,
         )
@@ -566,7 +566,7 @@ class Run:
                 launch_dir = self.record_dir / "launches" / launch_id
                 launch_dir.mkdir()
                 paths, argv = prepare(request, launch_dir, self.workdir)
-                reserved = Attempt(
+                reserved = LaunchRecord(
                     launch_id=launch_id, status="reserved", launch_dir=str(launch_dir), argv=argv
                 )
                 with self._mutex:
@@ -581,7 +581,7 @@ class Run:
                     pid: int,
                     command: tuple[str, ...],
                     started_at: str,
-                    reserved: Attempt = reserved,
+                    reserved: LaunchRecord = reserved,
                     entry: dict[str, object] = entry,
                 ) -> None:
                     with self._mutex:

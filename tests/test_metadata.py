@@ -67,16 +67,16 @@ request = Request('metadata', 'Write answer.', {}, ('answer.txt',), CommandWorke
 with Run(root / 'records', root) as run:
     result = run.call(request)
 assert result.status == expected, result
-assert len(result.attempts) == 1
-assert result.attempts[0].finished_at is not None
-assert result.attempts[0].evidence in (None, {}), result
+assert len(result.launches) == 1
+assert result.launches[0].finished_at is not None
+assert result.launches[0].evidence in (None, {}), result
 assert result.failed_at_launch_limit == (expected != 'delivered' and max_launches == 1)
 assert dict(result.outputs) == ({'answer.txt': 'done'} if expected == 'delivered' else {})
 with Run(root / 'records', root) as run:
     again = run.call(request)
 assert again.reused
 assert again.status == expected
-assert again.attempts == result.attempts
+assert again.launches == result.launches
 assert dict(again.outputs) == dict(result.outputs)
 assert again.failed_at_launch_limit == result.failed_at_launch_limit
 """

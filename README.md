@@ -21,6 +21,31 @@ Workjig does not import Commonplace or require a Git checkout. Its tests and
 examples run independently of Commonplace. Initial platform: Linux, Python
 3.11 or newer.
 
+## When to use Workjig
+
+We are trying two ways of running multi-agent work in this repository:
+
+- **Agent-steered:** an orchestrating agent delegates to sub-agents, interprets
+  their replies, and decides the next step. Our
+  [lightweight review workflow](instructions/lightweight-review.md) works this
+  way, through direct conversations.
+- **Code-steered:** Python controls branches, checks and correction loops.
+  Workjig launches headless workers, retains results, bounds execution and
+  accounts for launch allowances across restarts.
+
+Agent steering looks useful for exploratory work where the process changes
+as we learn. Workjig is useful when execution rules belong in code, completed
+calls should be reused after a restart, and interrupted work needs explicit
+recovery. We are dogfooding both to compare setup effort, ease of change,
+result quality, execution cost and recovery.
+
+We also tried a third approach in [Treadle](https://github.com/zby/treadle):
+code controlled the workflow, while an orchestrating agent carried prompts
+to harness workers and submitted answers back. That transmission layer and
+the machinery for determining which requests were ready proved complex.
+We switched to direct headless harness execution to simplify code-steered
+workflows.
+
 ## A call
 
 ```python
@@ -118,10 +143,18 @@ Their raw event streams remain in each launch's `stdout.log`. The standalone
 model fields; it does not infer the served model from the requested model.
 For Claude result records, it preserves the reported `modelUsage` mapping as
 `model_usage`, including entries for multiple models when present.
-`Attempt.evidence` is a separate optional worker-file protocol, not an
+`LaunchRecord.evidence` is a separate optional worker-file protocol, not an
 automatic interpretation of those CLI streams.
 
 ## Outcomes and recovery
+
+`CallResult.launches` contains immutable `LaunchRecord` values, one per launch
+reservation. A record can exist even when the subprocess did not start.
+
+`CallResult.failed_at_launch_limit` is true only when delivery failed and all
+launch allowance was spent. False does not imply retryability: delivery may
+have succeeded on the last launch, or a failure may be nonretryable despite
+remaining allowance.
 
 `CallResult.status` distinguishes `delivered`, `incomplete`, `worker_problem`,
 `usage_limit`, `process_error`, `timeout`, `launch_error`, `protocol_error`,
@@ -141,7 +174,7 @@ takes precedence over that error; a timeout takes precedence over both.
 Cleanup sends SIGTERM, waits up to 0.25 seconds while reaping the leader, then
 sends SIGKILL if the group still exists.
 
-`Attempt.problem` holds either a worker's `unable` or `usage_limit` report,
+`LaunchRecord.problem` holds either a worker's `unable` or `usage_limit` report,
 or runtime details with kind `launch_error` or `operator_acknowledgment`.
 
 An uncertain launch raises `UncertainLaunchError` before new work starts.
@@ -168,7 +201,8 @@ files. They do not restrict a worker's filesystem or network access. The caller
 configures permissions, credentials and the harness environment. External
 effects are not transactional and may need caller-owned recovery.
 
-See [the execution contract](docs/design.md) for guarantees and limits, and
+See [the execution contract](docs/design.md) for guarantees and limits,
+[design rationale](docs/design-rationale.md) for the choices behind them, and
 [harness evidence](docs/harness-evidence.md) for adapter evidence and tested
 versions. Support claims must distinguish deterministic tests from actual
 model invocations.
