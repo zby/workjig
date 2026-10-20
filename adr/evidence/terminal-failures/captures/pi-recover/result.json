@@ -1,0 +1,52 @@
+{
+  "harness": "pi",
+  "version": "1.3.0",
+  "scenario": "recover",
+  "returncode": 0,
+  "timed_out": false,
+  "requests": [
+    {
+      "path": "/v1/chat/completions",
+      "response": "recover",
+      "status": 429,
+      "body": {
+        "type": "error",
+        "error": {
+          "type": "rate_limit_exceeded",
+          "code": "rate_limit_exceeded",
+          "message": "rate limit exceeded"
+        },
+        "request_id": "req_fixture"
+      },
+      "should_retry": true
+    },
+    {
+      "path": "/v1/chat/completions",
+      "response": "success"
+    }
+  ],
+  "argv": [
+    "/usr/bin/node",
+    "/home/zby/.pi/agent/install/releases/1.3.0/node_modules/@earendil-works/pi-coding-agent/dist/cli.js",
+    "--mode",
+    "json",
+    "--provider",
+    "fixture",
+    "--model",
+    "fixture",
+    "--thinking",
+    "off",
+    "--no-tools",
+    "--no-extensions",
+    "--no-mcp",
+    "--no-skills",
+    "--no-prompt-templates",
+    "--no-context-files",
+    "--no-session",
+    "--no-approve",
+    "--offline",
+    "--system-prompt",
+    "You are a fixture client.",
+    "Return the fixture response. Do not use tools."
+  ]
+}

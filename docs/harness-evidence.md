@@ -70,8 +70,9 @@ a stable Pi-specific phrase. These are inherited observations, not new real
 probes. The handoff supplies no captured exit statuses or raw record locations
 for these messages, so no particular exit code is claimed here.
 
-Workjig now classifies a nonzero exit containing `usage limit` in either raw
-log, ignoring case, as `usage_limit` and does not automatically retry it.
+The initial classifier treated a nonzero exit containing `usage limit` in either
+raw log, ignoring case, as nonretryable `usage_limit`. This rule is superseded by
+[terminal-outcome classification (ADR 002)](../adr/002-classify-terminal-harness-failures.md).
 Timeouts retain their own status; exit-zero logs alone do not trigger this
 classification. This deliberately narrow text rule does not recognize every
 provider's quota error. Deterministic subprocess tests use synthetic messages
@@ -114,6 +115,28 @@ it does not collapse multiple models into an inferred served-model identity.
 Synthetic parser tests and a deterministic fake-CLI subprocess test cover
 this behavior separately from the real probe. No real quota exhaustion,
 authentication failure, or permission-denial behavior was tested here.
+
+## Terminal-failure protocol inspection, 2026-10-20
+
+The [detailed inspection](../adr/evidence/terminal-failures/README.md) establishes
+the distinctions behind [ADR 002](../adr/002-classify-terminal-harness-failures.md):
+
+- Codex's `turn.failed` is terminal, but a top-level `error` can precede retry.
+- Claude's final `result` can have `subtype: success` and `is_error: true`;
+  its pinned public types also expose structured rate-limit information.
+- Pi JSON mode can exit 0 after an assistant failure. Read the final assistant
+  message through `agent_settled`; neither exit 0 nor `aborted: false` means
+  the assistant succeeded.
+
+These findings come from version-scoped interfaces and synthetic Workjig checks.
+Subsequent [local-provider probes](../adr/evidence/terminal-failures/local-probes.md)
+ran 15 cases through the exact supported CLI versions in loopback-only network
+namespaces. They confirmed terminal quota/authentication errors, successful
+retries, and Pi's exit-zero failure behavior. Raw streams and a reproduction
+script are retained in the evidence bundle. These are real CLI executions
+against fixture responses, not live provider quota exhaustion. The ordinary test
+suite replays all 15 retained streams through deterministic subprocesses to check
+classification, retry allowances and reopen/reuse; it invokes no real harnesses.
 
 ## Usage-limit investigation, 2026-10-20
 

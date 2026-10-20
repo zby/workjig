@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
+from typing import Literal
 
 FAILURE_STATUSES = frozenset(
     {
@@ -85,12 +86,15 @@ class CommandWorker:
 
     Supported placeholders are prompt, input_dir, output_dir, problem_file,
     evidence_file, launch_dir, and workdir. The process runs in workdir.
+    output_protocol explicitly selects terminal-event classification of stdout;
+    None uses process exit and the file protocol only. name is descriptive.
     """
 
     argv: tuple[str, ...]
     name: str = "command"
     env: Mapping[str, str] = field(default_factory=dict)
     evidence_file: str | None = None
+    output_protocol: Literal["codex-json", "claude-stream-json", "pi-json"] | None = None
 
     def __post_init__(self) -> None:
         argv = tuple(self.argv)
@@ -109,6 +113,11 @@ class CommandWorker:
                 in {"inputs", "outputs", "prompt.txt", "problem.json", "stdout.log", "stderr.log"}
             ):
                 raise ValueError("unsafe evidence file name")
+        if self.output_protocol is not None and (
+            not isinstance(self.output_protocol, str)
+            or self.output_protocol not in {"codex-json", "claude-stream-json", "pi-json"}
+        ):
+            raise ValueError("unsupported output protocol")
         object.__setattr__(self, "argv", argv)
         object.__setattr__(self, "env", MappingProxyType(env))
 

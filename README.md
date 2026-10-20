@@ -146,6 +146,13 @@ For Claude result records, it preserves the reported `modelUsage` mapping as
 `LaunchRecord.evidence` is a separate optional worker-file protocol, not an
 automatic interpretation of those CLI streams.
 
+The factories set `CommandWorker.output_protocol` to `codex-json`,
+`claude-stream-json`, or `pi-json` for terminal-outcome classification. A generic
+`CommandWorker` defaults to `None` (exit status and the file protocol only);
+its display `name` never selects a parser. Protocol selection is part of request
+identity, so adding it to an existing request creates a different identity,
+not a continuation of the old launch allowance.
+
 ## Outcomes and recovery
 
 `CallResult.launches` contains immutable `LaunchRecord` values, one per launch
@@ -162,15 +169,23 @@ and an explicitly acknowledged `interrupted` launch. `RetryPolicy(on=(...),
 backoff_seconds=...)` selects which eligible execution outcomes to retry up
 to `Request.max_launches`. `usage_limit` and `protocol_error` cannot be
 selected for automatic retry.
-Recognition comes from the structured problem-file protocol or a nonzero exit
-whose stdout or stderr contains `usage limit` (case-insensitive). A timed-out
-launch remains `timeout`, even if its logs contain that phrase. Other provider
-quota messages in raw harness logs are not universally classified.
+A structured `usage_limit` problem or a recognized terminal harness quota,
+billing or unrecovered rate-limit failure stops automatic relaunches. This also
+handles Pi's exit-zero failures. Earlier errors followed by successful recovery
+and ordinary stdout/stderr quotations do not trigger usage stops. The harness
+owns short retries; after it gives up, the workflow decides what happens next.
+
+For a selected output protocol, other terminal failures and malformed or missing
+completion evidence become `process_error`, subject to explicit bounded retry.
+Unknown provider errors are not universally recognized as quota stops. A generic
+command has no log classifier. Existing committed outcomes replay unchanged.
+See [ADR 002](adr/002-classify-terminal-harness-failures.md) for supported signals
+and the evidence boundaries.
 
 If children outlive the worker leader, the runtime terminates the remaining
 process group and returns `process_error`, even after exit zero with complete
-outputs. A valid `usage_limit` problem or a nonzero exit with the raw-log marker
-takes precedence over that error; a timeout takes precedence over both.
+outputs. A valid `usage_limit` problem or recognized terminal usage stop takes
+precedence over that error; a timeout takes precedence over both.
 Cleanup sends SIGTERM, waits up to 0.25 seconds while reaping the leader, then
 sends SIGKILL if the group still exists.
 

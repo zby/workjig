@@ -85,7 +85,7 @@ def test_lingering_child_usage_precedence_and_replay(tmp_path: Path, report: str
     records = tmp_path / "records"
     with Run(records, tmp_path) as run:
         result = run.call(request)
-    assert result.status == ("process_error" if report == "none" else "usage_limit")
+    assert result.status == ("usage_limit" if report == "problem" else "process_error")
     assert result.outputs == {}
     assert len(result.launches) == 1
     with Run(records, tmp_path) as run:
@@ -208,16 +208,16 @@ def test_worker_argv_preserves_literal_braces(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     "message, exit_code, expected",
     [
-        ("Usage limit reached", 1, "usage_limit"),
-        ("You've hit your usage limit", 7, "usage_limit"),
-        ("Provider: USAGE LIMIT exceeded", 2, "usage_limit"),
-        ("x" * 65532 + "Usage limit reached", 1, "usage_limit"),
+        ("Usage limit reached", 1, "process_error"),
+        ("You've hit your usage limit", 7, "process_error"),
+        ("Provider: USAGE LIMIT exceeded", 2, "process_error"),
+        ("x" * 65532 + "Usage limit reached", 1, "process_error"),
         ("Usage limit reached", 0, "delivered"),
         ("Provider: rate limit exceeded", 1, "process_error"),
     ],
     ids=["claude", "codex", "provider", "chunk-boundary", "success", "other-error"],
 )
-def test_raw_usage_limit_classification_and_resume(
+def test_generic_log_text_does_not_classify_usage_limits(
     tmp_path: Path, stream: str, message: str, exit_code: int, expected: str
 ) -> None:
     script = tmp_path / "worker.py"

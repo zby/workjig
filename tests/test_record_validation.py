@@ -154,7 +154,7 @@ def test_inconsistent_lifecycle_record_is_rejected(completed_record, status, upd
         ("delivered", "output.write_text('done')"),
         ("incomplete", "pass"),
         ("worker_problem", "problem.write_text(json.dumps({'kind': 'unable', 'message': 'no'}))"),
-        ("usage_limit", "print('Usage limit reached'); sys.exit(7)"),
+        ("usage_limit", "problem.write_text(json.dumps({'kind': 'usage_limit', 'message': 'no'}))"),
         ("process_error", "sys.exit(3)"),
         ("protocol_error", "problem.write_text('broken JSON')"),
         ("timeout", "time.sleep(30)"),

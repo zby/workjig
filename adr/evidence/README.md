@@ -30,6 +30,13 @@ Link large external artifacts with a stable identifier or checksum rather than
 adding unrelated dumps. A reproduction script is supporting evidence, not a
 second runtime or a substitute for maintained tests.
 
+## Investigations
+
+- [Terminal failures](terminal-failures/README.md): version-scoped Codex,
+  Claude Code, and Pi completion signals, quota-related fields, and exit behavior.
+  Includes [local-provider probes](terminal-failures/local-probes.md), raw CLI
+  captures, and a bounded reproduction script.
+
 ## Existing evidence
 
 These materials remain at their current locations; link rather than duplicate:

@@ -1,0 +1,36 @@
+{
+  "harness": "codex",
+  "version": "codex-cli 0.162.1",
+  "scenario": "quota",
+  "returncode": 1,
+  "timed_out": false,
+  "requests": [
+    {
+      "path": "/v1/responses",
+      "response": "quota",
+      "status": 429,
+      "body": {
+        "type": "error",
+        "error": {
+          "type": "insufficient_quota",
+          "code": "insufficient_quota",
+          "message": "fixture quota exhausted"
+        },
+        "request_id": "req_fixture"
+      },
+      "should_retry": false
+    }
+  ],
+  "argv": [
+    "/tmp/workjig-usage-docs.UXSEuk/codex-platform/package/vendor/x86_64-unknown-linux-musl/bin/codex",
+    "exec",
+    "--json",
+    "--ephemeral",
+    "--skip-git-repo-check",
+    "-s",
+    "read-only",
+    "-c",
+    "approval_policy=\"never\"",
+    "Return the fixture response. Do not use tools."
+  ]
+}

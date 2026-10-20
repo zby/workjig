@@ -14,7 +14,7 @@ import pytest
         ('{"kind":[],"message":"oops"}', "{}", "exit", "protocol_error"),
         ('{"kind":{},"message":"oops"}', "{}", "exit", "protocol_error"),
         ('{"kind":[],"message":"oops"}', "{}", "timeout", "timeout"),
-        ('{"kind":[],"message":"oops"}', "{}", "log_limit", "usage_limit"),
+        ('{"kind":[],"message":"oops"}', "{}", "log_limit", "protocol_error"),
         ('{"kind":"usage_limit","message":"quota"}', '{"x":NaN}', "exit", "usage_limit"),
         ('{"kind":"usage_limit","message":"quota"}', '{"x":Infinity}', "timeout", "timeout"),
         ("absent", '{"nested":[NaN]}', "exit", "delivered"),
@@ -22,11 +22,12 @@ import pytest
         ("absent", '{"x":-Infinity}', "exit", "delivered"),
         ("absent", '{"x":1e400}', "exit", "delivered"),
         ("absent", '{"x":1e400}', "timeout", "timeout"),
-        ("absent", '{"x":1e400}', "log_limit", "usage_limit"),
+        ("absent", '{"x":1e400}', "log_limit", "process_error"),
         ("fifo", "{}", "exit", "protocol_error"),
         ("absent", "fifo", "exit", "delivered"),
         ("fifo", "fifo", "timeout", "timeout"),
-        ("fifo", "fifo", "log_limit", "usage_limit"),
+        ("fifo", "fifo", "log_limit", "protocol_error"),
+        ("absent", "{}", "log_fifo", "process_error"),
     ],
 )
 @pytest.mark.parametrize("max_launches", [1, 2])
@@ -50,6 +51,10 @@ if sys.argv[6] == 'timeout':
 if sys.argv[6] == 'log_limit':
     print('USAGE LIMIT', flush=True)
     sys.exit(7)
+if sys.argv[6] == 'log_fifo':
+    log = outputs.parent / 'stdout.log'
+    log.unlink()
+    os.mkfifo(log)
 """
     )
     controller = tmp_path / "controller.py"
@@ -63,7 +68,9 @@ root = Path(root)
 max_launches = int(max_launches)
 request = Request('metadata', 'Write answer.', {}, ('answer.txt',), CommandWorker(
     (sys.executable, worker, '{problem_file}', '{evidence_file}', '{output_dir}',
-     problem, evidence, outcome)), timeout_seconds=0.5, max_launches=max_launches)
+     problem, evidence, outcome),
+    output_protocol='pi-json' if outcome == 'log_fifo' else None),
+    timeout_seconds=0.5, max_launches=max_launches)
 with Run(root / 'records', root) as run:
     result = run.call(request)
 assert result.status == expected, result

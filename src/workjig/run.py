@@ -50,6 +50,12 @@ def _request_material(request: Request) -> dict[str, object]:
             "argv": list(request.worker.argv),
             "env": dict(request.worker.env),
             "evidence_file": request.worker.evidence_file,
+            # Omit the default to preserve canonical identity of existing records.
+            **(
+                {"output_protocol": request.worker.output_protocol}
+                if request.worker.output_protocol is not None
+                else {}
+            ),
         },
         "timeout_seconds": request.timeout_seconds,
         "max_launches": request.max_launches,
@@ -78,7 +84,11 @@ def _validated_request(call_id: str, material: object) -> Request:
         raise RecordError("invalid request material")
     worker = material["worker"]
     retry = material["retry"]
-    if not isinstance(worker, dict) or set(worker) != {"name", "argv", "env", "evidence_file"}:
+    worker_fields = {"name", "argv", "env", "evidence_file"}
+    if not isinstance(worker, dict) or set(worker) not in (
+        worker_fields,
+        worker_fields | {"output_protocol"},
+    ):
         raise RecordError("invalid worker material")
     if not isinstance(retry, dict) or set(retry) != {"on", "backoff_seconds"}:
         raise RecordError("invalid retry material")
@@ -94,6 +104,7 @@ def _validated_request(call_id: str, material: object) -> Request:
                 name=worker["name"],
                 env=worker["env"],
                 evidence_file=worker["evidence_file"],
+                output_protocol=worker.get("output_protocol"),
             ),
             timeout_seconds=material["timeout_seconds"],
             max_launches=material["max_launches"],

@@ -1,7 +1,7 @@
 """Version-scoped command templates and evidence extraction for headless CLIs.
 
-Factories only construct subprocess commands. They do not authenticate, launch
-models, or claim that a requested model was the one served.
+Factories construct commands and declare their output protocols. They do not
+authenticate, launch models, or claim that a requested model was the one served.
 """
 
 from __future__ import annotations
@@ -62,7 +62,7 @@ def codex_worker(
         _required_text(effort, "effort")
         argv.extend(("-c", f"model_reasoning_effort={effort}"))
     argv.append(_PROMPT_POINTER)
-    return CommandWorker(argv=tuple(argv), name="codex")
+    return CommandWorker(argv=tuple(argv), name="codex", output_protocol="codex-json")
 
 
 def claude_worker(
@@ -97,6 +97,7 @@ def claude_worker(
             _PROMPT_POINTER,
         ),
         name="claude",
+        output_protocol="claude-stream-json",
     )
 
 
@@ -133,6 +134,7 @@ def pi_worker(
             _PROMPT_POINTER,
         ),
         name="pi",
+        output_protocol="pi-json",
     )
 
 

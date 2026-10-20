@@ -1,0 +1,52 @@
+{
+  "harness": "claude",
+  "version": "2.1.303 (Claude Code)",
+  "scenario": "recover",
+  "returncode": 0,
+  "timed_out": false,
+  "requests": [
+    {
+      "path": "/v1/messages?beta=true",
+      "response": "recover",
+      "status": 429,
+      "body": {
+        "type": "error",
+        "error": {
+          "type": "rate_limit_error",
+          "code": "rate_limit_error",
+          "message": "rate limit exceeded"
+        },
+        "request_id": "req_fixture"
+      },
+      "should_retry": true
+    },
+    {
+      "path": "/v1/messages?beta=true",
+      "response": "success"
+    }
+  ],
+  "argv": [
+    "/home/zby/.local/share/claude/versions/2.1.303",
+    "--bare",
+    "-p",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--model",
+    "claude-haiku-4-5-20251001",
+    "--tools",
+    "",
+    "--strict-mcp-config",
+    "--setting-sources",
+    "",
+    "--no-session-persistence",
+    "--permission-mode",
+    "dontAsk",
+    "--permission-prompts",
+    "none",
+    "--disable-slash-commands",
+    "--system-prompt",
+    "You are a fixture client.",
+    "Return the fixture response. Do not use tools."
+  ]
+}

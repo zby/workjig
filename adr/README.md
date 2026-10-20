@@ -14,6 +14,7 @@ turning every paragraph of that overview into a record.
 | ADR | Decision | Status |
 |---|---|---|
 | [001](001-name-physical-launch-records.md) | Use launch vocabulary at the public API boundary | Accepted |
+| [002](002-classify-terminal-harness-failures.md) | Classify terminal harness failures, not whole logs | Accepted |
 
 ## When to write one
 

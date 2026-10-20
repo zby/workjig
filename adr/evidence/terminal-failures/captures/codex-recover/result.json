@@ -1,0 +1,40 @@
+{
+  "harness": "codex",
+  "version": "codex-cli 0.162.1",
+  "scenario": "recover",
+  "returncode": 0,
+  "timed_out": false,
+  "requests": [
+    {
+      "path": "/v1/responses",
+      "response": "recover",
+      "status": 429,
+      "body": {
+        "type": "error",
+        "error": {
+          "type": "rate_limit_exceeded",
+          "code": "rate_limit_exceeded",
+          "message": "rate limit exceeded"
+        },
+        "request_id": "req_fixture"
+      },
+      "should_retry": true
+    },
+    {
+      "path": "/v1/responses",
+      "response": "success"
+    }
+  ],
+  "argv": [
+    "/tmp/workjig-usage-docs.UXSEuk/codex-platform/package/vendor/x86_64-unknown-linux-musl/bin/codex",
+    "exec",
+    "--json",
+    "--ephemeral",
+    "--skip-git-repo-check",
+    "-s",
+    "read-only",
+    "-c",
+    "approval_policy=\"never\"",
+    "Return the fixture response. Do not use tools."
+  ]
+}

@@ -87,12 +87,26 @@ are caller-owned calls carrying feedback and previous results. A bounded
 workflow loop controls their allowance. These two budgets must not be
 conflated.
 
-A nonzero exit with `usage limit` anywhere in stdout or stderr, ignoring case,
-is classified as `usage_limit` and is not automatically retried. This takes
-precedence over other completed-process failures; a handled timeout remains
-`timeout`. A valid structured `usage_limit` problem has the same precedence,
-including when the leader exits zero or leaves children behind.
-A successful exit is not reclassified based on log text alone.
+Adapter factories explicitly declare their stdout protocol. The runtime selects
+the terminal outcome before classifying its cause: intermediate retry errors
+and ordinary task text do not establish failure. A recognized terminal quota,
+billing or unrecovered rate-limit failure becomes nonretryable `usage_limit`,
+including at exit zero. The harness handles short retries; after it gives up,
+the workflow decides whether and when to try again.
+
+A valid structured `usage_limit` problem remains a separate explicit stop signal.
+Either kind of usage stop takes precedence over other completed-process failures,
+including lingering children; a handled timeout remains `timeout`.
+Other recognized terminal failures, malformed or missing completion evidence, and
+nonzero exits become `process_error` unless a worker problem, invalid problem
+file or cleanup failure already determines the result. A successful terminal
+event still requires exit zero, clean process ownership and the declared files.
+
+Generic commands declare no output protocol and use exit status and the file
+protocol only. Stdout/stderr phrase scanning is not used. Protocol selection is
+declared request material, not inferred from the worker's display name. Existing
+committed outcomes are not reclassified. See [ADR 002](../adr/002-classify-terminal-harness-failures.md)
+for the evidence, supported signals and accepted fallback limits.
 
 ## Limits
 

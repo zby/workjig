@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from .models import LaunchRecord, Request
+from .outcomes import terminal_failure
 
 
 def _now() -> str:
@@ -126,18 +127,6 @@ def _read_evidence(path: Path) -> Mapping[str, object] | None:
     return value if isinstance(value, dict) else None
 
 
-def _has_usage_limit(path: Path) -> bool:
-    marker = b"usage limit"
-    tail = b""
-    with path.open("rb") as stream:
-        while chunk := stream.read(65536):
-            data = tail + chunk.lower()
-            if marker in data:
-                return True
-            tail = data[-(len(marker) - 1) :]
-    return False
-
-
 def launch(
     request: Request,
     workdir: Path,
@@ -207,13 +196,16 @@ def launch(
     missing: list[str] = []
     # Keep emitted invariants consistent with run._attempt_from_dict; preserve
     # compatibility with records produced by earlier classification rules.
+    harness_failure = (
+        terminal_failure(request.worker.output_protocol, stdout_path)
+        if request.worker.output_protocol is not None and not timed_out
+        else None
+    )
     if timed_out:
         status = "timeout"
-    elif process.returncode != 0 and (
-        _has_usage_limit(stdout_path) or _has_usage_limit(stderr_path)
+    elif harness_failure == "usage_limit" or (
+        problem is not None and problem["kind"] == "usage_limit"
     ):
-        status = "usage_limit"
-    elif problem is not None and problem["kind"] == "usage_limit":
         status = "usage_limit"
     elif group_lingered:
         status = "process_error"
@@ -221,7 +213,7 @@ def launch(
         status = "protocol_error"
     elif problem is not None:
         status = "worker_problem"
-    elif process.returncode != 0:
+    elif process.returncode != 0 or harness_failure is not None:
         status = "process_error"
     else:
         if paths["output_dir"].is_symlink():

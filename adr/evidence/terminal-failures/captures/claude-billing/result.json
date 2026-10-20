@@ -1,0 +1,48 @@
+{
+  "harness": "claude",
+  "version": "2.1.303 (Claude Code)",
+  "scenario": "billing",
+  "returncode": 1,
+  "timed_out": false,
+  "requests": [
+    {
+      "path": "/v1/messages?beta=true",
+      "response": "billing",
+      "status": 400,
+      "body": {
+        "type": "error",
+        "error": {
+          "type": "invalid_request_error",
+          "code": "invalid_request_error",
+          "message": "Your credit balance is too low to access the Anthropic API."
+        },
+        "request_id": "req_fixture"
+      },
+      "should_retry": false
+    }
+  ],
+  "argv": [
+    "/home/zby/.local/share/claude/versions/2.1.303",
+    "--bare",
+    "-p",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--model",
+    "claude-haiku-4-5-20251001",
+    "--tools",
+    "",
+    "--strict-mcp-config",
+    "--setting-sources",
+    "",
+    "--no-session-persistence",
+    "--permission-mode",
+    "dontAsk",
+    "--permission-prompts",
+    "none",
+    "--disable-slash-commands",
+    "--system-prompt",
+    "You are a fixture client.",
+    "Return the fixture response. Do not use tools."
+  ]
+}
