@@ -1,51 +1,52 @@
 # Workjig
 
 A standalone Python runtime for workflows that run headless LLM coding
-harnesses such as Codex, Claude Code and Pi as subprocess workers.
-Workflow code owns branches, checks and correction loops. The runtime owns
-subprocess launches, separate output paths, bounded execution and run records.
+harnesses such as Claude Code, Codex and Pi as subprocess workers.
+You write the workflow in Python; Workjig handles launches, separate output
+paths, bounded execution and durable run records.
 
-## Purpose and scope
+## Why Workjig?
 
-Workjig's primary goal is to support Commonplace as the runtime foundation
-of its workflow engine. It is extracted into a separate package so it can be
-maintained independently. The aim is to give agents a smaller, focused codebase
-and a clear contract to work against, helping them build a better package.
+**Use existing harnesses, not another model API integration.** Workjig delegates
+work to coding harnesses through their command-line interfaces, using their
+tools, configuration and authentication. An important motivation is letting
+people use Claude Code with an eligible Anthropic subscription rather than
+requiring separate API billing. Availability depends on the harness, account,
+provider terms and usage limits; Workjig does not supply or bypass access.
 
-Commonplace's workflow needs drive development priorities. Workjig owns the
-reusable execution machinery; Commonplace owns its workflows, domain rules,
-checks and correction policies. Reuse in other projects is a secondary
-opportunity: keep the package independently usable without adding abstractions
-for hypothetical consumers.
+**Keep the whole workflow in Python.** Branches, parallel work, checks and
+correction loops are ordinary Python, not a separate graph or workflow language.
+Unlike libraries centered on direct model API calls, Workjig treats the harness
+as the worker. [mdflow](https://github.com/johnlindquist/mdflow) is another
+harness-based approach: it turns Markdown prompts into executable CLI commands
+that can be composed through pipes. For Commonplace, where most of the system
+is already Python, keeping workflow control in Python lets us reuse its code
+and tests without introducing another way to express control flow.
 
-Workjig does not import Commonplace or require a Git checkout. Its tests and
-examples run independently of Commonplace. Initial platform: Linux, Python
-3.11 or newer.
+**Keep the runtime small and independent.** Workjig's primary purpose is to
+support [Commonplace](https://github.com/zby/commonplace) as the foundation of
+its workflow engine. A separate package gives agents a focused codebase and a
+clear execution contract. Commonplace drives priorities, but its domain rules
+stay outside the runtime. Workjig requires neither Commonplace nor Git.
+Initial platform: Linux, Python 3.11 or newer.
 
-## When to use Workjig
+### Code-steered or agent-steered?
 
-We are trying two ways of running multi-agent work in this repository:
+Agent-led delegation is useful for exploratory work where the process changes
+as we learn; our [lightweight review workflow](instructions/lightweight-review.md)
+uses that approach. Workjig is for code-steered work: execution rules live in
+Python, completed calls can be reused after restart, and interruptions require
+explicit recovery. We are trying both, not claiming one is always better.
 
-- **Agent-steered:** an orchestrating agent delegates to sub-agents, interprets
-  their replies, and decides the next step. Our
-  [lightweight review workflow](instructions/lightweight-review.md) works this
-  way, through direct conversations.
-- **Code-steered:** Python controls branches, checks and correction loops.
-  Workjig launches headless harnesses as workers, retains results, bounds
-  execution and accounts for launch allowances across restarts.
+In [Treadle](https://github.com/zby/treadle), code controlled the workflow but an
+agent carried prompts and answers between it and workers. Workjig launches
+harnesses directly to remove that transmission and coordination layer.
 
-Agent steering looks useful for exploratory work where the process changes
-as we learn. Workjig is useful when execution rules belong in code, completed
-calls should be reused after a restart, and interrupted work needs explicit
-recovery. We are dogfooding both to compare setup effort, ease of change,
-result quality, execution cost and recovery.
-
-We also tried a third approach in [Treadle](https://github.com/zby/treadle):
-code controlled the workflow, while an orchestrating agent carried prompts
-to harness workers and submitted answers back. That transmission layer and
-the machinery for determining which requests were ready proved complex.
-We switched to direct headless harness execution to simplify code-steered
-workflows.
+The supporting research lives in the [Commonplace KB](https://zby.github.io/commonplace/),
+including notes on [orchestration design dimensions](https://github.com/zby/commonplace/blob/main/kb/notes/agent-orchestration-occupies-a-multi-dimensional-design-space.md)
+and [coordination guarantees versus channels](https://github.com/zby/commonplace/blob/main/kb/notes/agent-orchestration-needs-coordination-guarantees-not-just.md).
+These inform the design; they are not evidence of Workjig's tested behavior.
+Our [design rationale](docs/design-rationale.md) explains the local tradeoffs.
 
 ## A call
 
@@ -55,13 +56,7 @@ from pathlib import Path
 
 from workjig import CommandWorker, Request, Run
 
-worker = CommandWorker(
-    argv=(
-        sys.executable,
-        str(Path("worker.py").resolve()),
-        "{prompt}",
-    )
-)
+worker = CommandWorker(argv=(sys.executable, str(Path("worker.py").resolve()), "{prompt}"))
 request = Request(
     call_id="summarize-v1",
     task="Read the supplied source and write the requested summary file.",
@@ -79,154 +74,41 @@ with Run(Path("run-records"), Path.cwd()) as run:
         print(result.status)
 ```
 
-`worker.py` represents your worker executable. It receives the path of a
-generated prompt that lists absolute input and output paths. It must read the
-inputs and write the named files. Standard output is execution evidence, not
-the requested file result. Command arguments are passed without a shell.
+Supply your own `worker.py`: it receives a generated prompt with absolute input
+and output paths, reads the inputs and writes the named files. Standard output
+is execution evidence, not the file result. For real harnesses, use the
+`claude_worker`, `codex_worker` or `pi_worker` factories instead of a generic
+`CommandWorker`; see [usage and adapter configuration](docs/usage.md).
+The [ordinary-file example](examples/README.md) provides a runnable workflow
+with checks, corrections and resume.
 
-The generic command adapter also accepts `{input_dir}`, `{output_dir}`,
-`{problem_file}`, `{launch_dir}` and `{workdir}` path tokens. Named inputs and
-outputs are single filenames. Each physical launch has fresh paths, including
-when a call retries.
+## Guarantees and boundaries
 
-## Resume and corrections
+- **Reuse:** reopening a run reuses committed results only when the stable call
+  identity and declared request match. Ambient environment changes are not
+  detected automatically.
+- **Bounded execution:** one launch by default; retries and larger allowances
+  are explicit. Launches are reserved durably, and restart does not refund them.
+- **Explicit recovery:** unresolved launches block automatic work until you
+  establish that the old worker has stopped and acknowledge it.
+- **Delivery is not acceptance:** your workflow checks content and bounds
+  correction loops. Reused results still need those checks.
+- **Separate files are not a sandbox:** callers own permissions, credentials,
+  environment compatibility and recovery of external effects.
 
-Reopen the same run directory and repeat the same call to reuse a committed
-result. Both the stable call identity and declared request must match.
-Different identities request independent work even when their prompts match.
+## Documentation
 
-The caller must keep the surrounding environment compatible with reuse.
-Changing ambient files, tools or workflow logic may require a new run. The
-runtime does not infer those dependencies, pin code or manage environments.
-
-Check delivered content in your workflow. For a correction, create a new call
-with a stable identity for that correction, previous content and findings as
-inputs. Bound that loop in workflow code. Replay a cached result through its
-check; delivery does not certify acceptance. Use fixed sibling snapshots for
-checks whose answer depends on other parallel results.
-
-The default is one physical launch. Larger limits and execution retry policy
-must be explicit. Each launch reservation spends an allowance before process
-start. Restarting does not refund consumed allowances. An unresolved launch
-reservation blocks automatic work: establish that the old worker has stopped
-before acknowledging it with `acknowledge_stopped`. This operation records
-your assertion; it cannot prove that the old process is gone.
-
-`run.parallel(requests, max_workers=...)` preserves result order and waits for
-all submitted work to settle before reporting an exception. It does not create
-a dependency scheduler. The limit applies to that group; callers creating other
-threads or parallel groups remain responsible for their combined concurrency.
-
-## Harness adapters
-
-```python
-from workjig.adapters import codex_worker, pi_worker
-
-codex = codex_worker("gpt-6.1-sol", sandbox="workspace-write", effort="low")
-pi = pi_worker(
-    "gpt-6.1-sol",
-    provider="openai",
-    tools=("read", "write"),
-    project_trust="no-approve",
-)
-```
-
-Pass one of these as the request's `worker`. Put the run records inside a
-directory the worker can write; the adapter does not widen the sandbox for
-record paths. Pi's project-trust option controls resource loading, not OS
-permissions. A `claude_worker` command factory is also available; Claude Code
-2.1.303 passed the bounded file-copy and reuse probe with requested model
-`haiku`, reporting `claude-haiku-5-5` (see the harness evidence).
-
-Codex and Pi have each passed a bounded real file-copy probe and reuse check.
-Their raw event streams remain in each launch's `stdout.log`. The standalone
-`parse_evidence(harness, stdout_text)` helper extracts available session and
-model fields; it does not infer the served model from the requested model.
-For Claude result records, it preserves the reported `modelUsage` mapping as
-`model_usage`, including entries for multiple models when present.
-`LaunchRecord.evidence` is a separate optional worker-file protocol, not an
-automatic interpretation of those CLI streams.
-
-The factories set `CommandWorker.output_protocol` to `codex-json`,
-`claude-stream-json`, or `pi-json` for terminal-outcome classification. A generic
-`CommandWorker` defaults to `None` (exit status and the file protocol only);
-its display `name` never selects a parser. Protocol selection is part of request
-identity, so adding it to an existing request creates a different identity,
-not a continuation of the old launch allowance.
-
-## Outcomes and recovery
-
-`CallResult.launches` contains immutable `LaunchRecord` values, one per launch
-reservation. A record can exist even when the subprocess did not start.
-
-`CallResult.failed_at_launch_limit` is true only when delivery failed and all
-launch allowance was spent. False does not imply retryability: delivery may
-have succeeded on the last launch, or a failure may be nonretryable despite
-remaining allowance.
-
-`CallResult.status` distinguishes `delivered`, `incomplete`, `worker_problem`,
-`usage_limit`, `process_error`, `timeout`, `launch_error`, `protocol_error`,
-and an explicitly acknowledged `interrupted` launch. `RetryPolicy(on=(...),
-backoff_seconds=...)` selects which eligible execution outcomes to retry up
-to `Request.max_launches`. `usage_limit` and `protocol_error` cannot be
-selected for automatic retry.
-A structured `usage_limit` problem or a recognized terminal harness quota,
-billing or unrecovered rate-limit failure stops automatic relaunches. This also
-handles Pi's exit-zero failures. Earlier errors followed by successful recovery
-and ordinary stdout/stderr quotations do not trigger usage stops. The harness
-owns short retries; after it gives up, the workflow decides what happens next.
-
-For a selected output protocol, other terminal failures and malformed or missing
-completion evidence become `process_error`, subject to explicit bounded retry.
-Unknown provider errors are not universally recognized as quota stops. A generic
-command has no log classifier. Existing committed outcomes replay unchanged.
-See [ADR 002](adr/002-classify-terminal-harness-failures.md) for supported signals
-and the evidence boundaries.
-
-If children outlive the worker leader, the runtime terminates the remaining
-process group and returns `process_error`, even after exit zero with complete
-outputs. A valid `usage_limit` problem or recognized terminal usage stop takes
-precedence over that error; a timeout takes precedence over both.
-Cleanup sends SIGTERM, waits up to 0.25 seconds while reaping the leader, then
-sends SIGKILL if the group still exists.
-
-`LaunchRecord.problem` holds either a worker's `unable` or `usage_limit` report,
-or runtime details with kind `launch_error` or `operator_acknowledgment`.
-
-An uncertain launch raises `UncertainLaunchError` before new work starts.
-Inspect `run.unresolved_launches()`, establish that the old worker and its
-children have stopped, then call `run.acknowledge_stopped(launch_id)`. To allow
-a subsequent launch, the original request must have remaining allowance and
-an explicit retry policy including `interrupted`. Otherwise start a new run
-deliberately. Changing execution policy or limits changes declared request
-identity; it is not a way to continue the original call's budget.
-
-Corrupt records raise `RecordError`. A persistence failure can poison the
-current controller: close and reopen it before inspection or recovery. Never
-delete a reservation merely to suppress uncertainty.
-An exception or keyboard interruption after reservation also requires explicit
-recovery, even when process cleanup ran: cleanup alone does not commit a
-terminal record. If `run.json` is missing from an existing record directory,
-preserve that directory, confirm any old workers have stopped, and choose a
-fresh directory and launch allowances deliberately.
-
-## Boundaries
-
-Separate output directories prevent accidental reuse of another launch's
-files. They do not restrict a worker's filesystem or network access. The caller
-configures permissions, credentials and the harness environment. External
-effects are not transactional and may need caller-owned recovery.
-
-See [the execution contract](docs/design.md) for guarantees and limits,
-[design rationale](docs/design-rationale.md) and
-[decision records](adr/README.md) for the choices behind them, and
-[harness evidence](docs/harness-evidence.md) for adapter evidence and tested
-versions. Support claims must distinguish deterministic tests from actual
-model invocations.
+- [Usage and recovery](docs/usage.md) — adapters, retries, outcomes, parallel calls
+  and recovery procedures.
+- [Execution contract](docs/design.md) — guarantees and limits.
+- [Design rationale](docs/design-rationale.md) and [decision records](adr/README.md)
+  — reasons, alternatives and tradeoffs.
+- [Harness evidence](docs/harness-evidence.md) — tested adapters and versions,
+  distinguishing deterministic tests from actual model invocations.
 
 ## Development
 
-Run commands from this package directory:
+Run from this package directory:
 
 ```sh
 uv sync --locked
@@ -236,16 +118,7 @@ uv run ruff format --check .
 uv build
 ```
 
-Parser and classification tests exercise functions and files directly. Execution
-and recovery tests use real subprocesses with deterministic worker fixtures.
-Neither requires model credentials. Real-harness probes are separate, bounded operations.
-Building creates local distribution artifacts; publishing is a separate step.
-
-The [ordinary-file example](examples/README.md) demonstrates checks, corrections
-and resume. To run a real, credential-using probe deliberately:
-
-```sh
-uv run python examples/smoke_harness.py codex /tmp/my-codex-probe --model gpt-6.1-sol
-uv run python examples/smoke_harness.py pi /tmp/my-pi-probe --model gpt-6.1-sol
-uv run python examples/smoke_harness.py claude /tmp/my-claude-probe --model haiku
-```
+Normal tests use direct parser checks and deterministic subprocess workers;
+they do not call model APIs or require credentials. Real-harness probes are
+[separate, deliberate operations](docs/usage.md#examples-and-real-harness-probes).
+Building creates local artifacts; publishing is a separate step.
