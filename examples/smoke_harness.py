@@ -9,7 +9,7 @@ from pathlib import Path
 from workjig import Request, Run
 from workjig.adapters import claude_worker, codex_worker, parse_evidence, pi_worker
 
-DEFAULT_MODELS = {"codex": "luna", "claude": "haiku", "pi": "luna"}
+DEFAULT_MODELS = {"codex": "gpt-6-luna", "claude": "haiku", "pi": "luna"}
 
 
 def probe(harness: str, workdir: Path, model: str) -> dict[str, object]:
@@ -72,7 +72,8 @@ def main() -> None:
     parser.add_argument("harness", choices=(*DEFAULT_MODELS, "all"))
     parser.add_argument("workdir", type=Path)
     parser.add_argument(
-        "--model", help="override a single harness's default (codex/pi: luna; claude: haiku)"
+        "--model",
+        help="override a single harness's default (codex: gpt-6-luna; claude: haiku; pi: luna)",
     )
     args = parser.parse_args()
     if args.harness == "all" and args.model is not None:

@@ -25,7 +25,7 @@ def test_all_smoke_defaults_isolation_and_failure_settlement(tmp_path, failure):
             f"harness = {harness!r}\n"
             "flag = '-m' if harness == 'codex' else '--model'\n"
             "model = sys.argv[sys.argv.index(flag) + 1]\n"
-            "assert model == ('haiku' if harness == 'claude' else 'luna')\n"
+            "assert model == {'codex': 'gpt-6-luna', 'claude': 'haiku', 'pi': 'luna'}[harness]\n"
             "with Path('launches').open('a') as log: log.write(model + '\\n')\n"
             f"failure = {failure!r} if harness == 'codex' else None\n"
             "if failure == 'process': sys.exit(7)\n"
@@ -53,7 +53,7 @@ def test_all_smoke_defaults_isolation_and_failure_settlement(tmp_path, failure):
     assert [report["harness"] for report in reports] == ["codex", "claude", "pi"]
     for report in reports:
         harness = report["harness"]
-        model = "haiku" if harness == "claude" else "luna"
+        model = {"codex": "gpt-6-luna", "claude": "haiku", "pi": "luna"}[harness]
         assert report["requested_model"] == model
         assert report["records"] == str(root / harness / "records")
         assert (root / harness / "launches").read_text() == model + "\n"

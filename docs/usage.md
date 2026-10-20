@@ -189,7 +189,7 @@ and resume. To run all three real, credential-using probes deliberately:
 uv run python examples/smoke_harness.py all /tmp/my-harness-probes
 ```
 
-Defaults: Codex **luna**, Claude **haiku**, Pi **luna** (provider `openai`).
+Defaults: Codex **gpt-6-luna**, Claude **haiku**, Pi **luna** (provider `openai`).
 Install and authenticate each CLI first; models must be available through your
 configured account. These are requested model names, not verified served-model
 identities. The command runs sequentially, with separate `codex`, `claude` and
