@@ -4,7 +4,11 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 from workjig import CommandWorker, Request, RetryPolicy, Run
+
+pytestmark = pytest.mark.subprocess
 
 
 def test_successful_retry_without_output_cannot_adopt_failed_output(tmp_path: Path):

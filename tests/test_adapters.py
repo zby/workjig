@@ -35,6 +35,7 @@ def _render(worker):
     return worker.command(paths)
 
 
+@pytest.mark.unit
 def test_codex_command_has_explicit_model_sandbox_and_unattended_policy():
     command = _render(codex_worker("gpt-6.1-sol", sandbox="workspace-write", effort="medium"))
     assert command[:2] == ("codex", "exec")
@@ -48,6 +49,7 @@ def test_codex_command_has_explicit_model_sandbox_and_unattended_policy():
     assert "--ignore-rules" not in command
 
 
+@pytest.mark.unit
 def test_claude_command_requires_tool_choice_and_denies_unanswered_prompts():
     command = _render(claude_worker("sonnet", allowed_tools=("Read", "Write")))
     assert command[:2] == ("claude", "-p")
@@ -61,6 +63,7 @@ def test_claude_command_requires_tool_choice_and_denies_unanswered_prompts():
     assert "--bare" not in command
 
 
+@pytest.mark.unit
 def test_pi_command_requires_provider_tools_and_trust_choice():
     command = _render(
         pi_worker(
@@ -76,6 +79,7 @@ def test_pi_command_requires_provider_tools_and_trust_choice():
     assert "/tmp/launch-1/prompt.txt" in command[-1]
 
 
+@pytest.mark.unit
 def test_command_rendering_keeps_literal_braces_while_replacing_path_tokens():
     command = _render(CommandWorker(argv=("worker", '{"literal": 1}', "{prompt}")))
     assert command == ("worker", '{"literal": 1}', "/tmp/launch-1/prompt.txt")
@@ -92,6 +96,7 @@ def test_command_rendering_keeps_literal_braces_while_replacing_path_tokens():
         lambda: pi_worker("m", provider="p", tools=("read",), project_trust="unknown"),
     ],
 )
+@pytest.mark.unit
 def test_invalid_adapter_configuration_is_rejected(build):
     with pytest.raises(ValueError):
         build()
@@ -101,6 +106,7 @@ def _jsonl(*records):
     return "\n".join(json.dumps(record) for record in records)
 
 
+@pytest.mark.unit
 def test_codex_evidence_keeps_session_and_terminal_failure_without_model_guess():
     evidence = parse_evidence(
         "codex",
@@ -115,6 +121,7 @@ def test_codex_evidence_keeps_session_and_terminal_failure_without_model_guess()
     assert "served_model" not in evidence
 
 
+@pytest.mark.unit
 def test_claude_retry_rate_limit_is_not_a_final_usage_limit_claim():
     evidence = parse_evidence(
         "claude",
@@ -131,6 +138,7 @@ def test_claude_retry_rate_limit_is_not_a_final_usage_limit_claim():
     assert "served_model" not in evidence
 
 
+@pytest.mark.unit
 def test_pi_evidence_distinguishes_requested_and_concrete_response_model():
     evidence = parse_evidence(
         "pi",
@@ -157,6 +165,7 @@ def test_pi_evidence_distinguishes_requested_and_concrete_response_model():
     assert evidence["settled_aborted"] is False
 
 
+@pytest.mark.unit
 def test_claude_result_preserves_usage_for_multiple_models_without_guessing():
     usage = {
         "claude-haiku-example": {"inputTokens": 12, "outputTokens": 8},
@@ -169,11 +178,13 @@ def test_claude_result_preserves_usage_for_multiple_models_without_guessing():
 
 
 @pytest.mark.parametrize("usage", [None, "haiku", ["haiku"]])
+@pytest.mark.unit
 def test_claude_invalid_model_usage_is_not_model_evidence(usage):
     evidence = parse_evidence("claude", _jsonl({"type": "result", "modelUsage": usage}))
     assert "model_usage" not in evidence
 
 
+@pytest.mark.subprocess
 def test_claude_smoke_script_with_deterministic_executable(tmp_path: Path):
     executable = tmp_path / "bin" / "claude"
     executable.parent.mkdir()
@@ -219,6 +230,7 @@ def test_claude_smoke_script_with_deterministic_executable(tmp_path: Path):
     assert (workdir / "launches").read_text() == "launch\n"
 
 
+@pytest.mark.unit
 def test_partial_and_malformed_stream_does_not_invent_completion():
     evidence = parse_evidence("pi", '{"type":"session","id":"pi-2"}\nnot json\n')
     assert evidence["session_id"] == "pi-2"
@@ -227,6 +239,7 @@ def test_partial_and_malformed_stream_does_not_invent_completion():
     assert "served_model" not in evidence
 
 
+@pytest.mark.unit
 def test_jsonl_parser_does_not_split_unicode_line_separator_inside_text():
     raw = json.dumps(
         {"type": "message_end", "message": {"role": "assistant", "model": "m\u2028v"}},

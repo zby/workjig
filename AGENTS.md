@@ -57,11 +57,13 @@ are failures, not automatic skips. Use the existing development environment for
 routine checks; an editable install is fine. Use a fresh environment when
 testing built distributions, installing the artifact rather than the source tree.
 
-Tests are functional: run real subprocesses with deterministic worker fixtures,
-never a real model API in the normal test suite. Use owned processes and isolated
-private state. Check delivered files, errors, effects, restart behavior,
-budgets and process cleanup, not collection alone. Real-harness probes are
-separate, deliberate, bounded operations that may use credentials.
+Test parsing, classification and validation directly with unit or file-based
+functional tests. Use real subprocesses with deterministic worker fixtures for
+execution guarantees: delivered files, errors, effects, restart behavior, budgets
+and process cleanup. Keep representative integration cases rather than repeating
+the full lifecycle for every parser input. Use owned processes and isolated
+private state; never call a real model API in the normal test suite. Real-harness
+probes are separate, deliberate, bounded operations that may use credentials.
 
 Other agents may be working in this repository at the same time. Use your own
 temporary directories for stores and scratch files.

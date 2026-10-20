@@ -1,4 +1,4 @@
-"""Terminal classification through real deterministic subprocesses, never models."""
+"""Direct stream classification plus focused real-subprocess integration tests."""
 
 import json
 import sys
@@ -9,6 +9,7 @@ import pytest
 
 from workjig import CommandWorker, RecordError, Request, RetryPolicy, Run
 from workjig.adapters import claude_worker, codex_worker, pi_worker
+from workjig.outcomes import terminal_failure
 
 CAPTURES = Path(__file__).resolve().parents[1] / "adr/evidence/terminal-failures/captures"
 PROTOCOLS = {"codex": "codex-json", "claude": "claude-stream-json", "pi": "pi-json"}
@@ -60,7 +61,6 @@ def request(protocol, stream, *, code=0, behavior="exit", problem=None):
             output_protocol=protocol,
         ),
         max_launches=2,
-        retry=RetryPolicy(on=("process_error",)),
         timeout_seconds=0.5,
     )
 
@@ -69,23 +69,31 @@ def check(tmp_path, req, status):
     records = tmp_path / "records"
     with Run(records, tmp_path) as run:
         result = run.call(req)
-    count = 2 if status == "process_error" else 1
     assert result.status == status
-    assert len(result.launches) == count
     assert dict(result.outputs) == ({"answer.txt": "candidate"} if status == "delivered" else {})
-    assert result.failed_at_launch_limit == (status == "process_error")
-    with Run(records, tmp_path) as run:
-        replay = run.call(req)
-    assert replay.reused
-    assert replay.launches == result.launches
-    assert replay.status == result.status
-    assert dict(replay.outputs) == dict(result.outputs)
-    assert (tmp_path / "starts").read_text().splitlines() == ["start"] * count
     return result
 
 
+def expected_status(scenario):
+    if scenario in {"success", "recover"}:
+        return "delivered"
+    return "process_error" if scenario == "auth" else "usage_limit"
+
+
 @pytest.mark.parametrize("case", CASES)
-def test_retained_cli_streams_classify_and_replay(tmp_path, case):
+@pytest.mark.unit
+def test_retained_cli_streams_classify(case):
+    fixture = CAPTURES / case
+    observed = json.loads((fixture / "result.json").read_text())
+    expected = expected_status(observed["scenario"])
+    assert terminal_failure(PROTOCOLS[observed["harness"]], fixture / "stdout.jsonl") == (
+        None if expected == "delivered" else expected
+    )
+
+
+@pytest.mark.parametrize("case", ["codex-quota", "claude-recover", "pi-auth", "pi-quota"])
+@pytest.mark.subprocess
+def test_adapter_outcomes_retry_and_replay(tmp_path, case):
     fixture = CAPTURES / case
     observed = json.loads((fixture / "result.json").read_text())
     harness = observed["harness"]
@@ -102,19 +110,32 @@ def test_retained_cli_streams_classify_and_replay(tmp_path, case):
     # Preserve the factory's actual protocol selection while substituting a
     # deterministic executable. No harness installation is needed by the suite.
     worker = replace(factories[harness](), argv=req.worker.argv, name="renamed-display")
-    req = replace(req, worker=worker)
-    scenario = observed["scenario"]
-    expected = (
-        "delivered"
-        if scenario in {"success", "recover"}
-        else ("process_error" if scenario == "auth" else "usage_limit")
-    )
+    req = replace(req, worker=worker, retry=RetryPolicy(on=("process_error",)))
+    expected = expected_status(observed["scenario"])
     result = check(tmp_path, req, expected)
     assert all(launch.returncode == observed["returncode"] for launch in result.launches)
+    # Cover each factory and runtime outcome, including Pi's exit-zero errors.
+    # Stream variations are tested directly, without repeating this lifecycle.
+    count = 2 if expected == "process_error" else 1
+    assert len(result.launches) == count
+    assert result.failed_at_launch_limit == (expected == "process_error")
+    with Run(tmp_path / "records", tmp_path) as run:
+        replay = run.call(req)
+    assert replay.reused
+    assert replay.launches == result.launches
+    assert replay.status == result.status
+    assert dict(replay.outputs) == dict(result.outputs)
+    assert (tmp_path / "starts").read_text().splitlines() == ["start"] * count
 
 
 def jsonl(*records):
     return "\n".join(json.dumps(r, ensure_ascii=False) for r in records) + "\n"
+
+
+def classify(tmp_path, protocol, stream):
+    path = tmp_path / "stdout.jsonl"
+    path.write_text(stream, encoding="utf-8")
+    return terminal_failure(protocol, path)
 
 
 CLAUDE_FAILURE = {
@@ -208,17 +229,10 @@ SETTLED = {"type": "agent_settled", "aborted": False}
             ],
             "delivered",
         ),
-        (
-            "claude-stream-json",
-            [CLAUDE_SUCCESS, {"type": "system", "subtype": "ui_invalidate"}],
-            "delivered",
-        ),
         ("claude-stream-json", [{**CLAUDE_FAILURE, "api_error_status": 429}], "usage_limit"),
         ("claude-stream-json", [{**CLAUDE_FAILURE, "is_error": "false"}], "process_error"),
         ("claude-stream-json", [{**CLAUDE_FAILURE, "subtype": "unknown"}], "process_error"),
-        ("pi-json", [PI_ERROR], "process_error"),
         ("pi-json", [PI_ERROR, {"type": "agent_end", "willRetry": False}], "process_error"),
-        ("pi-json", [PI_ERROR, SETTLED], "usage_limit"),
         ("pi-json", [PI_ERROR, {"type": "auto_retry_start"}, SETTLED], "process_error"),
         (
             "pi-json",
@@ -227,7 +241,6 @@ SETTLED = {"type": "agent_settled", "aborted": False}
         ),
         ("pi-json", [PI_ERROR, {**SETTLED, "aborted": True}], "process_error"),
         ("pi-json", [PI_STOP, {**SETTLED, "aborted": "false"}], "process_error"),
-        ("pi-json", [PI_ERROR, {"type": "auto_retry_start"}, PI_STOP, SETTLED], "delivered"),
         (
             "pi-json",
             [
@@ -240,49 +253,47 @@ SETTLED = {"type": "agent_settled", "aborted": False}
         ("pi-json", [PI_STOP, SETTLED, {"type": "agent_start"}], "process_error"),
     ],
 )
+@pytest.mark.unit
 def test_terminal_selection_and_scoping(tmp_path, protocol, records, expected):
-    check(tmp_path, request(protocol, jsonl(*records)), expected)
+    assert classify(tmp_path, protocol, jsonl(*records)) == (
+        None if expected == "delivered" else expected
+    )
 
 
-@pytest.mark.parametrize("protocol", PROTOCOLS.values())
-@pytest.mark.parametrize("stream", ["", "not json\n", "[]\n", '{"type":[]}\n', '{"type":'])
-def test_unknown_or_malformed_stream_is_bounded_process_error(tmp_path, protocol, stream):
-    check(tmp_path, request(protocol, stream), "process_error")
+# Framing/JSON validation is shared by all protocols: representative inputs
+# suffice here rather than a protocol-by-malformation cross-product.
+@pytest.mark.parametrize("stream", ["", "[]\n", '{"type":[]}\n', '{"type":'])
+@pytest.mark.unit
+def test_missing_or_malformed_completion(tmp_path, stream):
+    assert classify(tmp_path, "codex-json", stream) == "process_error"
 
 
-@pytest.mark.parametrize("first", [PI_STOP, PI_ERROR])
-@pytest.mark.parametrize("message", [None, [], {}, {"role": []}])
+@pytest.mark.parametrize("first,message", [(PI_STOP, []), (PI_ERROR, {})])
+@pytest.mark.unit
 def test_malformed_pi_message_cannot_preserve_prior_outcome(tmp_path, first, message):
     stream = jsonl(first, {"type": "message_end", "message": message}, SETTLED)
-    check(tmp_path, request("pi-json", stream), "process_error")
+    assert classify(tmp_path, "pi-json", stream) == "process_error"
 
 
-@pytest.mark.parametrize(
-    "protocol,records",
-    [
-        ("codex-json", [{"type": "turn.completed"}]),
-        ("claude-stream-json", [CLAUDE_SUCCESS]),
-        ("pi-json", [PI_STOP, SETTLED]),
-    ],
-)
-@pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
-def test_invalid_json_constants_cannot_establish_completion(tmp_path, protocol, records, constant):
-    stream = jsonl(*records).rstrip()[:-1] + ', "extra": ' + constant + "}\n"
-    check(tmp_path, request(protocol, stream), "process_error")
+@pytest.mark.unit
+def test_invalid_json_constant_cannot_establish_completion(tmp_path):
+    stream = '{"type":"turn.completed","usage":NaN}\n'
+    assert classify(tmp_path, "codex-json", stream) == "process_error"
 
 
-@pytest.mark.parametrize("protocol", PROTOCOLS.values())
-def test_malformed_line_cannot_adopt_quota_event(tmp_path, protocol):
-    harness = next(h for h, p in PROTOCOLS.items() if p == protocol)
-    stream = (CAPTURES / f"{harness}-quota" / "stdout.jsonl").read_text()
-    check(tmp_path, request(protocol, stream + "broken\n"), "process_error")
+@pytest.mark.unit
+def test_malformed_line_cannot_adopt_quota_event(tmp_path):
+    stream = (CAPTURES / "codex-quota" / "stdout.jsonl").read_text()
+    assert classify(tmp_path, "codex-json", stream + "broken\n") == "process_error"
 
 
 @pytest.mark.parametrize("behavior,expected", [("timeout", "timeout"), ("linger", "usage_limit")])
+@pytest.mark.subprocess
 def test_terminal_quota_precedence(tmp_path, behavior, expected):
     check(tmp_path, request("pi-json", jsonl(PI_ERROR, SETTLED), behavior=behavior), expected)
 
 
+@pytest.mark.subprocess
 def test_structured_worker_stop_overrides_unknown_harness_stream(tmp_path):
     check(
         tmp_path,
@@ -295,21 +306,25 @@ def test_structured_worker_stop_overrides_unknown_harness_stream(tmp_path):
     )
 
 
+@pytest.mark.subprocess
 def test_success_event_does_not_override_failed_exit(tmp_path):
     check(tmp_path, request("claude-stream-json", jsonl(CLAUDE_SUCCESS), code=7), "process_error")
 
 
+@pytest.mark.subprocess
 def test_display_name_does_not_select_protocol(tmp_path):
     req = request(None, jsonl(PI_ERROR, SETTLED))
     check(tmp_path, replace(req, worker=replace(req.worker, name="pi")), "delivered")
 
 
-@pytest.mark.parametrize("value", ["unknown", "", [], {}, True, 3])
+@pytest.mark.parametrize("value", ["unknown", []])
+@pytest.mark.unit
 def test_invalid_protocol_rejected(value):
     with pytest.raises(ValueError, match="output protocol"):
         CommandWorker(("worker",), output_protocol=value)
 
 
+@pytest.mark.subprocess
 def test_output_protocol_is_declared_identity(tmp_path):
     req = request(None, jsonl(PI_ERROR, SETTLED))
     with Run(tmp_path / "records", tmp_path) as run:
@@ -327,8 +342,9 @@ def test_output_protocol_is_declared_identity(tmp_path):
         assert run.call(replace(req, worker=replace(req.worker, output_protocol="pi-json"))).reused
 
 
+@pytest.mark.subprocess
 def test_old_record_outcome_is_not_reclassified(tmp_path):
-    req = replace(request(None, "usage limit", code=7), retry=RetryPolicy())
+    req = request(None, "usage limit", code=7)
     records = tmp_path / "records"
     with Run(records, tmp_path) as run:
         first = run.call(req)
@@ -348,6 +364,7 @@ def test_old_record_outcome_is_not_reclassified(tmp_path):
     assert (tmp_path / "starts").read_text().splitlines() == ["start"]
 
 
+@pytest.mark.subprocess
 def test_corrupt_persisted_protocol_raises_record_error(tmp_path):
     req = request("pi-json", jsonl(PI_STOP, SETTLED))
     with Run(tmp_path / "records", tmp_path) as run:

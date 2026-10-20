@@ -2,4 +2,5 @@ recursive-include docs *.md
 recursive-include adr *.md
 recursive-include adr/evidence/terminal-failures *.py *.json *.jsonl *.log
 recursive-include examples *.py *.md
+recursive-include tests *.py *.md
 include uv.lock

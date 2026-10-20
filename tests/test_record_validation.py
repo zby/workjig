@@ -8,6 +8,8 @@ import pytest
 
 from workjig import CommandWorker, LaunchRecord, RecordError, Request, Run
 
+pytestmark = pytest.mark.subprocess
+
 
 @pytest.fixture
 def completed_record(tmp_path: Path):

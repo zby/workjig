@@ -136,8 +136,9 @@ namespaces. They confirmed terminal quota/authentication errors, successful
 retries, and Pi's exit-zero failure behavior. Raw streams and a reproduction
 script are retained in the evidence bundle. These are real CLI executions
 against fixture responses, not live provider quota exhaustion. The ordinary test
-suite replays all 15 retained streams through deterministic subprocesses to check
-classification, retry allowances and reopen/reuse; it invokes no real harnesses.
+suite checks all 15 retained streams directly through the classifier. Representative
+subprocess tests cover adapter wiring, retry allowances and reopen/reuse; the
+suite invokes no real harnesses.
 
 ## Usage-limit investigation, 2026-10-20
 

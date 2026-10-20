@@ -131,6 +131,7 @@ def command(script: Path, log: Path, mode: str = "echo", marker: str = "") -> Co
     )
 
 
+@pytest.mark.subprocess
 def test_same_material_different_call_ids_launch_independently(
     command_script: Path, tmp_path: Path
 ) -> None:
@@ -146,6 +147,7 @@ def test_same_material_different_call_ids_launch_independently(
     assert len([e for e in events(log) if e["event"] == "start"]) == 2
 
 
+@pytest.mark.subprocess
 def test_changed_declared_inputs_miss_reuse(command_script: Path, tmp_path: Path) -> None:
     log = tmp_path / "events.jsonl"
     worker = command(command_script, log)
@@ -158,6 +160,7 @@ def test_changed_declared_inputs_miss_reuse(command_script: Path, tmp_path: Path
     assert len([e for e in events(log) if e["event"] == "start"]) == 2
 
 
+@pytest.mark.subprocess
 def test_failed_partial_output_and_problem_do_not_leak(
     command_script: Path, tmp_path: Path
 ) -> None:
@@ -179,6 +182,7 @@ def test_failed_partial_output_and_problem_do_not_leak(
     assert len([e for e in events(log) if e["event"] == "start"]) == 2
 
 
+@pytest.mark.subprocess
 def test_request_and_result_are_immutable_snapshots(command_script: Path, tmp_path: Path) -> None:
     log = tmp_path / "events.jsonl"
     input_contents = {"value.txt": "original"}
@@ -209,6 +213,7 @@ def test_request_and_result_are_immutable_snapshots(command_script: Path, tmp_pa
     assert len(events(log)) == 2
 
 
+@pytest.mark.subprocess
 def test_parallel_group_returns_all_execution_outcomes(
     command_script: Path, tmp_path: Path
 ) -> None:
@@ -229,6 +234,7 @@ def test_parallel_group_returns_all_execution_outcomes(
     assert results[1].status == "delivered"
 
 
+@pytest.mark.subprocess
 def test_parallel_group_settles_running_and_queued_calls_before_raising(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -279,6 +285,7 @@ def test_parallel_group_settles_running_and_queued_calls_before_raising(
 
 
 @pytest.mark.parametrize("delays", [(0.0, 0.2), (0.2, 0.0)])
+@pytest.mark.subprocess
 def test_ordinary_workflow_resumes_and_checks_frozen_siblings(
     tmp_path: Path, delays: tuple[float, float]
 ) -> None:
@@ -328,6 +335,7 @@ def test_ordinary_workflow_resumes_and_checks_frozen_siblings(
     assert len((workdir / "invocations.log").read_text(encoding="utf-8").splitlines()) == 4
 
 
+@pytest.mark.subprocess
 def test_workflow_correction_budget_is_bounded(tmp_path: Path) -> None:
     workdir = tmp_path / "ordinary"
     workdir.mkdir()
@@ -360,6 +368,7 @@ def test_workflow_correction_budget_is_bounded(tmp_path: Path) -> None:
     assert len((workdir / "invocations.log").read_text(encoding="utf-8").splitlines()) == 4
 
 
+@pytest.mark.subprocess
 def test_launch_allowance_remains_spent_after_restart(command_script: Path, tmp_path: Path) -> None:
     log = tmp_path / "events.jsonl"
     call = request(
@@ -379,6 +388,7 @@ def test_launch_allowance_remains_spent_after_restart(command_script: Path, tmp_
     assert len([e for e in events(log) if e["event"] == "start"]) == 2
 
 
+@pytest.mark.subprocess
 def test_missing_output_and_usage_limit_are_explicit(command_script: Path, tmp_path: Path) -> None:
     log = tmp_path / "events.jsonl"
     with Run(tmp_path / "records", tmp_path) as run:
@@ -401,6 +411,7 @@ def test_missing_output_and_usage_limit_are_explicit(command_script: Path, tmp_p
 @pytest.mark.parametrize(
     "unsafe_name", ("../escape.txt", "/tmp/escape.txt", "nested/name.txt", "..")
 )
+@pytest.mark.unit
 def test_runtime_managed_names_reject_escape(
     command_script: Path, tmp_path: Path, unsafe_name: str
 ) -> None:
@@ -409,6 +420,7 @@ def test_runtime_managed_names_reject_escape(
         Request("escape", "Write the result.", {"value.txt": "value"}, (unsafe_name,), worker)
 
 
+@pytest.mark.subprocess
 def test_unresolved_reservation_blocks_resume_until_old_worker_stops(
     command_script: Path, tmp_path: Path
 ) -> None:
@@ -466,6 +478,7 @@ def test_unresolved_reservation_blocks_resume_until_old_worker_stops(
         "changed_content",
     ),
 )
+@pytest.mark.subprocess
 def test_missing_or_corrupt_result_record_fails_visibly(
     command_script: Path, tmp_path: Path, damage: str
 ) -> None:
@@ -496,6 +509,7 @@ def test_missing_or_corrupt_result_record_fails_visibly(
             run.call(request("stored", worker))
 
 
+@pytest.mark.subprocess
 def test_failed_result_commit_poisoned_controller_until_reopen(
     command_script: Path, tmp_path: Path
 ) -> None:

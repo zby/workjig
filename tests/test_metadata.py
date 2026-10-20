@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.subprocess
+
 
 @pytest.mark.parametrize(
     ("problem", "evidence", "outcome", "expected"),

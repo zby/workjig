@@ -28,6 +28,7 @@ SRC = Path(__file__).resolve().parents[1] / "src"
 
 
 @pytest.mark.parametrize("ignore_term", [False, True])
+@pytest.mark.subprocess
 def test_cleanup_reaps_cooperative_leader_and_escalates_uncooperative_one(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ignore_term: bool
 ) -> None:
@@ -66,6 +67,7 @@ def test_cleanup_reaps_cooperative_leader_and_escalates_uncooperative_one(
 
 
 @pytest.mark.parametrize("report", ["none", "raw", "problem"])
+@pytest.mark.subprocess
 def test_lingering_child_usage_precedence_and_replay(tmp_path: Path, report: str) -> None:
     script = tmp_path / "linger.py"
     script.write_text(
@@ -95,6 +97,7 @@ def test_lingering_child_usage_precedence_and_replay(tmp_path: Path, report: str
     assert replay.launches == result.launches
 
 
+@pytest.mark.subprocess
 def test_protocol_names_are_safe_inside_input_and_output_directories(tmp_path: Path) -> None:
     names = (
         "prompt.txt",
@@ -124,6 +127,7 @@ def test_protocol_names_are_safe_inside_input_and_output_directories(tmp_path: P
         assert run.call(request).reused
 
 
+@pytest.mark.unit
 def test_first_open_missing_record_preserves_directory_and_explains_recovery(
     tmp_path: Path,
 ) -> None:
@@ -137,6 +141,7 @@ def test_first_open_missing_record_preserves_directory_and_explains_recovery(
     assert (records / ".lock").exists()
 
 
+@pytest.mark.subprocess
 def test_cooperative_timeout_commits_timeout_even_after_exit_zero(tmp_path: Path) -> None:
     script = tmp_path / "worker.py"
     stopped = tmp_path / "stopped"
@@ -196,6 +201,7 @@ def _request(
     )
 
 
+@pytest.mark.subprocess
 def test_worker_argv_preserves_literal_braces(tmp_path: Path) -> None:
     worker = CommandWorker((sys.executable, "-c", 'print({"x": 1})', "{prompt}"))
     prompt = tmp_path / "{input_dir}" / "prompt.txt"
@@ -217,6 +223,7 @@ def test_worker_argv_preserves_literal_braces(tmp_path: Path) -> None:
     ],
     ids=["claude", "codex", "provider", "chunk-boundary", "success", "other-error"],
 )
+@pytest.mark.subprocess
 def test_generic_log_text_does_not_classify_usage_limits(
     tmp_path: Path, stream: str, message: str, exit_code: int, expected: str
 ) -> None:
@@ -250,6 +257,7 @@ def test_generic_log_text_does_not_classify_usage_limits(
 
 
 @pytest.mark.parametrize("message", ["", "Usage limit reached"])
+@pytest.mark.subprocess
 def test_timeout_is_not_classified_as_usage_limit(tmp_path: Path, message: str) -> None:
     script = tmp_path / "worker.py"
     script.write_text(f"import time\nprint({message!r}, flush=True)\ntime.sleep(30)\n")
@@ -262,6 +270,7 @@ def test_timeout_is_not_classified_as_usage_limit(tmp_path: Path, message: str) 
 
 
 @pytest.mark.parametrize("leader_exits", [False, True])
+@pytest.mark.subprocess
 def test_process_group_children_are_stopped(tmp_path: Path, leader_exits: bool) -> None:
     script = tmp_path / "worker.py"
     script.write_text(
@@ -314,6 +323,7 @@ if mode == 'wait':
             pass
 
 
+@pytest.mark.unit
 def test_lock_workdir_binding_and_closed_controller(tmp_path: Path) -> None:
     records = tmp_path / "records"
     other = tmp_path / "other"
@@ -330,6 +340,7 @@ def test_lock_workdir_binding_and_closed_controller(tmp_path: Path) -> None:
             pass
 
 
+@pytest.mark.subprocess
 def test_cleanup_error_leaves_reservation_unresolved(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -368,6 +379,7 @@ def test_cleanup_error_leaves_reservation_unresolved(
         run.acknowledge_stopped(unresolved[0].launch_id)
 
 
+@pytest.mark.subprocess
 def test_acknowledgment_spends_prelaunch_reservation_and_blocks_other_ids(tmp_path: Path) -> None:
     records = tmp_path / "records"
     script = tmp_path / "worker.py"
@@ -407,6 +419,7 @@ def test_acknowledgment_spends_prelaunch_reservation_and_blocks_other_ids(tmp_pa
     assert delivered.launches[0].status == "interrupted"
 
 
+@pytest.mark.subprocess
 def test_completed_record_survives_exit_after_atomic_commit(tmp_path: Path) -> None:
     records = tmp_path / "records"
     marker = tmp_path / "launches.txt"
@@ -452,12 +465,14 @@ def test_completed_record_survives_exit_after_atomic_commit(tmp_path: Path) -> N
 
 
 @pytest.mark.parametrize("value", [0, -1, True, float("nan"), float("inf")])
+@pytest.mark.unit
 def test_invalid_timeout_rejected(value: object) -> None:
     with pytest.raises(ValueError):
         _request(CommandWorker(("echo",)), timeout=value)
 
 
 @pytest.mark.parametrize("value", [0, -1, True, 1.5])
+@pytest.mark.unit
 def test_invalid_launch_limit_rejected(value: object) -> None:
     with pytest.raises(ValueError):
         _request(CommandWorker(("echo",)), max_launches=value)

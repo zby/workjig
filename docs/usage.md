@@ -183,10 +183,32 @@ model invocations.
 ## Examples and real-harness probes
 
 The [ordinary-file example](../examples/README.md) demonstrates checks, corrections
-and resume. To run a real, credential-using probe deliberately:
+and resume. To run all three real, credential-using probes deliberately:
 
 ```sh
-uv run python examples/smoke_harness.py codex /tmp/my-codex-probe --model gpt-6.1-sol
-uv run python examples/smoke_harness.py pi /tmp/my-pi-probe --model gpt-6.1-sol
+uv run python examples/smoke_harness.py all /tmp/my-harness-probes
+```
+
+Defaults: Codex **luna**, Claude **haiku**, Pi **luna** (provider `openai`).
+Install and authenticate each CLI first; models must be available through your
+configured account. These are requested model names, not verified served-model
+identities. The command runs sequentially, with separate `codex`, `claude` and
+`pi` subdirectories. Each probe allows one launch with a 180-second timeout,
+checks an exact file copy and verifies cached reuse. It prints one JSON report
+per harness, attempts all three even after a probe fails, and exits nonzero if
+any probe fails. Keyboard interruption still stops the command.
+
+Use a fresh root directory for a fresh set of model calls. Repeating a successful
+command with the same directory reuses its committed results. Records and raw
+logs remain under each harness's `records` directory. Probes stay manual, outside
+pytest and GitHub CI.
+
+To run just one harness, or override its model:
+
+```sh
+uv run python examples/smoke_harness.py codex /tmp/my-codex-probe
+uv run python examples/smoke_harness.py pi /tmp/my-pi-probe
 uv run python examples/smoke_harness.py claude /tmp/my-claude-probe --model haiku
 ```
+
+`--model` applies only to single-harness commands, not `all`.
