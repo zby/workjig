@@ -1,4 +1,4 @@
-"""Local headless worker calls with durable, run-scoped results."""
+"""Run headless LLM coding harnesses as subprocess workers with durable results."""
 
 from .models import CallResult, CommandWorker, LaunchRecord, Request, RetryPolicy
 from .run import RecordError, Run, RunBusyError, UncertainLaunchError

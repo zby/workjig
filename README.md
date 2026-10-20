@@ -1,6 +1,7 @@
 # Workjig
 
-A standalone Python runtime for workflows that invoke headless workers.
+A standalone Python runtime for workflows that run headless LLM coding
+harnesses such as Codex, Claude Code and Pi as subprocess workers.
 Workflow code owns branches, checks and correction loops. The runtime owns
 subprocess launches, separate output paths, bounded execution and run records.
 
@@ -30,8 +31,8 @@ We are trying two ways of running multi-agent work in this repository:
   [lightweight review workflow](instructions/lightweight-review.md) works this
   way, through direct conversations.
 - **Code-steered:** Python controls branches, checks and correction loops.
-  Workjig launches headless workers, retains results, bounds execution and
-  accounts for launch allowances across restarts.
+  Workjig launches headless harnesses as workers, retains results, bounds
+  execution and accounts for launch allowances across restarts.
 
 Agent steering looks useful for exploratory work where the process changes
 as we learn. Workjig is useful when execution rules belong in code, completed
@@ -235,8 +236,9 @@ uv run ruff format --check .
 uv build
 ```
 
-Tests use real subprocesses with deterministic worker fixtures. They do not
-require model credentials. Real-harness probes are separate, bounded operations.
+Parser and classification tests exercise functions and files directly. Execution
+and recovery tests use real subprocesses with deterministic worker fixtures.
+Neither requires model credentials. Real-harness probes are separate, bounded operations.
 Building creates local distribution artifacts; publishing is a separate step.
 
 The [ordinary-file example](examples/README.md) demonstrates checks, corrections
