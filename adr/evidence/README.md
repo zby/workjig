@@ -43,6 +43,3 @@ These materials remain at their current locations; link rather than duplicate:
 
 - [Harness evidence](../../docs/harness-evidence.md): version-scoped interface
   research, bounded real probes, and the usage-limit investigation.
-- [Commonplace handoff](../../docs/handoff-from-commonplace-2026-10-20.md):
-  consumer reasoning and proposed changes, including the vocabulary issue
-  addressed by [ADR 001](../001-name-physical-launch-records.md).

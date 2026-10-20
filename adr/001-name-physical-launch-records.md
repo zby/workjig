@@ -9,9 +9,8 @@ Recorded: 2026-10-20
 Workjig records each physical launch reservation, including reservations for
 which no process started. Commonplace uses “attempt” for a larger unit of work
 that includes content checking and correction. Using the same word at both
-levels obscures which lifecycle and budget a caller is discussing. The
-[consumer handoff](../docs/handoff-from-commonplace-2026-10-20.md#one-vocabulary-point-from-the-consumer-side)
-identified this integration problem.
+levels obscures which lifecycle and budget a caller is discussing.
+Commonplace's integration review identified this problem.
 
 ## Decision
 

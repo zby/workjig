@@ -40,8 +40,10 @@ invocations when making support claims.
   budgets belong to workflow code, not an implicit runtime correction loop.
 - Build on harness public interfaces; do not copy or patch their internals.
 - Keep the implementation small; add only what current work needs.
-- Ask before settling open choices in the design. Do not promote experimental
-  findings into approved policy.
+- Ask before settling open choices in the design, changing the public API or
+  record format, using credentials for real model probes, publishing, or
+  bumping the version. Do not promote experimental findings into approved
+  policy.
 - Keep the package standalone. Tests and examples must not depend on Treadle
   or Commonplace. Test support must not become a hidden second runner.
 

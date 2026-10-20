@@ -159,9 +159,9 @@ run records keep their format. See [ADR 001](../adr/001-name-physical-launch-rec
 
 ## Consumer feedback to evaluate
 
-The [Commonplace handoff](handoff-from-commonplace-2026-10-20.md) supplied useful
-explanations and integration concerns for this rationale. Its proposed changes
-remain choices to evaluate against consumer needs:
+Commonplace's integration review supplied explanations and concerns for this
+rationale. Its proposed changes remain choices to evaluate against consumer
+needs:
 
 - Narrow usage-limit recognition and attach parsed harness evidence to records.
 - Separate writable launch files from committed records and support isolated

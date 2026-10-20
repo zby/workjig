@@ -63,11 +63,12 @@ synthetically tested only; its subsequent real probe is recorded below.
 
 ## Usage-limit classification, 2026-10-19
 
-The repository handoff reports these messages observed in installed harnesses:
+The initial contributor handoff, since removed, reported these messages
+observed in installed harnesses:
 Claude Code: `Usage limit reached`; Codex: `You've hit your usage limit`.
-It reports that Pi passes the provider's error through, without establishing
+It reported that Pi passes the provider's error through, without establishing
 a stable Pi-specific phrase. These are inherited observations, not new real
-probes. The handoff supplies no captured exit statuses or raw record locations
+probes. It supplied no captured exit statuses or raw record locations
 for these messages, so no particular exit code is claimed here.
 
 The initial classifier treated a nonzero exit containing `usage limit` in either
