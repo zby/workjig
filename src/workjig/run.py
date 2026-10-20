@@ -17,7 +17,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from .harness import launch, prepare
-from .models import Attempt, CallResult, CommandWorker, Request, RetryPolicy
+from .models import FAILURE_STATUSES, Attempt, CallResult, CommandWorker, Request, RetryPolicy
 
 
 class RecordError(RuntimeError):
@@ -132,41 +132,135 @@ def _thaw(value: object) -> object:
 def _attempt_from_dict(value: object) -> Attempt:
     if not isinstance(value, dict):
         raise RecordError("attempt is not an object")
-    try:
-        attempt = Attempt(
-            launch_id=value["launch_id"],
-            status=value["status"],
-            launch_dir=value["launch_dir"],
-            argv=tuple(value["argv"]) if value["argv"] is not None else None,
-            pid=value["pid"],
-            returncode=value["returncode"],
-            started_at=value["started_at"],
-            finished_at=value["finished_at"],
-            problem=value["problem"],
-            evidence=value["evidence"],
-            missing_outputs=tuple(value["missing_outputs"]),
-        )
-    except (KeyError, TypeError, ValueError) as error:
-        raise RecordError(f"invalid attempt record: {error}") from error
-    if not isinstance(attempt.launch_id, str) or not attempt.launch_id:
-        raise RecordError("invalid launch id")
-    if attempt.status not in {
+    fields = {
+        "launch_id",
+        "status",
+        "launch_dir",
+        "argv",
+        "pid",
+        "returncode",
+        "started_at",
+        "finished_at",
+        "problem",
+        "evidence",
+        "missing_outputs",
+    }
+    if set(value) != fields:
+        raise RecordError("invalid attempt fields")
+    for field in ("launch_id", "launch_dir"):
+        if not isinstance(value[field], str) or not value[field]:
+            raise RecordError(f"invalid attempt {field}")
+    status = value["status"]
+    if not isinstance(status, str) or status not in FAILURE_STATUSES | {
         "reserved",
         "running",
         "delivered",
-        "incomplete",
-        "worker_problem",
-        "usage_limit",
-        "process_error",
-        "timeout",
-        "launch_error",
-        "protocol_error",
-        "interrupted",
     }:
         raise RecordError("invalid attempt status")
-    if not isinstance(attempt.launch_dir, str) or not attempt.launch_dir:
-        raise RecordError("invalid launch directory")
-    return attempt
+    argv = value["argv"]
+    if (
+        not isinstance(argv, list)
+        or not argv
+        or not all(isinstance(arg, str) and arg for arg in argv)
+    ):
+        raise RecordError("invalid attempt argv")
+    for field in ("pid", "returncode"):
+        number = value[field]
+        if number is not None and (type(number) is not int or (field == "pid" and number <= 0)):
+            raise RecordError(f"invalid attempt {field}")
+    for field in ("started_at", "finished_at"):
+        timestamp = value[field]
+        if timestamp is not None:
+            try:
+                if (
+                    not isinstance(timestamp, str)
+                    or datetime.fromisoformat(timestamp).tzinfo is None
+                ):
+                    raise ValueError("expected timezone-aware timestamp")
+            except ValueError as error:
+                raise RecordError(f"invalid attempt {field}") from error
+    problem = value["problem"]
+    if problem is not None and (
+        not isinstance(problem, dict)
+        or set(problem) != {"kind", "message"}
+        or not all(isinstance(item, str) for item in problem.values())
+        or problem["kind"]
+        not in {"unable", "usage_limit", "launch_error", "operator_acknowledgment"}
+    ):
+        raise RecordError("invalid attempt problem")
+    evidence = value["evidence"]
+    if evidence is not None:
+        if not isinstance(evidence, dict):
+            raise RecordError("invalid attempt evidence")
+        try:
+            json.dumps(evidence, allow_nan=False)
+        except (TypeError, ValueError) as error:
+            raise RecordError("invalid attempt evidence") from error
+    missing = value["missing_outputs"]
+    if (
+        not isinstance(missing, list)
+        or not all(isinstance(name, str) and name for name in missing)
+        or len(set(missing)) != len(missing)
+    ):
+        raise RecordError("invalid attempt missing_outputs")
+
+    pid, returncode = value["pid"], value["returncode"]
+    started, finished = value["started_at"], value["finished_at"]
+    if status in {"reserved", "running"}:
+        valid = (
+            returncode is None
+            and finished is None
+            and problem is None
+            and evidence is None
+            and not missing
+            and (
+                (pid is None and started is None)
+                if status == "reserved"
+                else (pid is not None and started is not None)
+            )
+        )
+    elif status == "interrupted":
+        valid = (
+            finished is not None
+            and returncode is None
+            and ((pid is None) == (started is None))
+            and problem is not None
+            and problem["kind"] == "operator_acknowledgment"
+            and evidence is None
+            and not missing
+        )
+    elif status == "launch_error":
+        valid = (
+            started is not None
+            and finished is not None
+            and pid is None
+            and returncode is None
+            and problem is not None
+            and problem["kind"] == "launch_error"
+            and evidence is None
+            and not missing
+        )
+    else:
+        valid = (
+            pid is not None
+            and returncode is not None
+            and started is not None
+            and finished is not None
+            and (problem is None or problem["kind"] in {"unable", "usage_limit"})
+            and (not missing or status in {"incomplete", "protocol_error"})
+        )
+        if status in {"delivered", "incomplete"}:
+            valid = (
+                valid
+                and returncode == 0
+                and problem is None
+                and bool(missing) == (status == "incomplete")
+            )
+        if status == "worker_problem":
+            valid = valid and problem is not None and problem["kind"] == "unable"
+    if not valid:
+        raise RecordError(f"inconsistent {status} attempt")
+    return Attempt(**{**value, "argv": tuple(argv), "missing_outputs": tuple(missing)})
 
 
 def _validate_state(state: object) -> dict[str, object]:
@@ -200,6 +294,8 @@ def _validate_state(state: object) -> dict[str, object]:
             ):
                 raise RecordError("invalid attempt order")
             for attempt in parsed:
+                if not set(attempt.missing_outputs) <= set(request.required_outputs):
+                    raise RecordError("attempt names undeclared missing outputs")
                 if attempt.launch_id in all_launch_ids:
                     raise RecordError("duplicate launch id")
                 all_launch_ids.add(attempt.launch_id)
