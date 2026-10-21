@@ -49,6 +49,15 @@ on pushes and pull requests. Separate checks run lint, formatting and the build.
 No model credentials, harness installations or real model calls are configured.
 A local pass does not establish that every CI matrix entry has passed remotely.
 
+When checking or regenerating `uv.lock`, ignore machine-local uv configuration
+so personal resolver settings do not leak into the shared lockfile:
+
+```sh
+uv --no-config lock --check
+uv --no-config lock                 # only when intentionally updating the lock
+uv --no-config sync --locked        # reproduce CI without personal uv settings
+```
+
 ## Real-harness probes stay manual
 
 [`examples/smoke_harness.py`](../examples/smoke_harness.py) deliberately invokes
