@@ -18,7 +18,8 @@ def test_all_smoke_defaults_isolation_and_failure_settlement(tmp_path, failure):
     binaries.mkdir()
     for harness in ("codex", "claude", "pi"):
         executable = binaries / harness
-        executable.write_text(
+        script = binaries / (harness + ".py")
+        script.write_text(
             f"#!{sys.executable}\n"
             "import json, sys\n"
             "from pathlib import Path\n"
@@ -31,7 +32,7 @@ def test_all_smoke_defaults_isolation_and_failure_settlement(tmp_path, failure):
             "if failure == 'process': sys.exit(7)\n"
             "prompt = Path(sys.argv[-1].split('`')[1]).read_text()\n"
             "paths = [Path(line.split(': ', 1)[1]) for line in prompt.splitlines()\n"
-            "    if line.startswith('- ') and ': /' in line]\n"
+            "    if line.startswith('- ') and ': ' in line]\n"
             "source = next(path for path in paths if path.name == 'source.txt')\n"
             "output = next(path for path in paths if path.name == 'answer.txt')\n"
             "output.write_bytes(b'wrong' if failure == 'content' else source.read_bytes())\n"
@@ -43,7 +44,11 @@ def test_all_smoke_defaults_isolation_and_failure_settlement(tmp_path, failure):
             "}\n"
             "for event in events[harness]: print(json.dumps(event))\n"
         )
-        executable.chmod(0o755)
+        if os.name == "nt":
+            executable = binaries / (harness + ".cmd")
+            executable.write_text(f'@echo off\n"{sys.executable}" "%~dp0{harness}.py" %*\n')
+        else:
+            script.chmod(0o755)
     root = tmp_path / "probes"
     command = [sys.executable, str(SMOKE), "all", str(root)]
     env = {**os.environ, "PATH": str(binaries) + os.pathsep + os.environ["PATH"]}

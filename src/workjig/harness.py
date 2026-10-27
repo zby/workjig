@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import signal
 import subprocess
 import time
@@ -176,8 +177,13 @@ def launch(
         return launch_error(error)
     try:
         try:
+            launch_argv = argv
+            if os.name == "nt":
+                executable = shutil.which(argv[0])
+                if executable is not None:
+                    launch_argv = (executable, *argv[1:])
             process = subprocess.Popen(
-                argv,
+                launch_argv,
                 cwd=workdir,
                 env=env,
                 stdin=subprocess.DEVNULL,
