@@ -4,10 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
-import signal
 import subprocess
-import time
 from collections.abc import Callable, Mapping
 from contextlib import ExitStack
 from dataclasses import replace
@@ -16,6 +13,7 @@ from pathlib import Path
 
 from .models import LaunchRecord, Request
 from .outcomes import terminal_failure
+from .platform import cleanup_process_group, process_creation_options, resolve_command
 
 
 def _now() -> str:
@@ -61,49 +59,10 @@ def prepare(
     return paths, request.worker.command(paths)
 
 
-def _group_exists(pgid: int) -> bool:
-    if os.name == "nt":
-        return False
-    try:
-        os.killpg(pgid, 0)
-    except ProcessLookupError:
-        return False
-    return True
-
-
 def _cleanup_group(process: subprocess.Popen[bytes]) -> bool:
-    """Terminate descendants even if the leader has already exited."""
-    if os.name == "nt":
-        if process.poll() is None:
-            completed = subprocess.run(
-                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-            )
-            return completed.returncode == 0
-        return False
-    pgid = process.pid
-    process.poll()
-    if not _group_exists(pgid):
-        return False
-    try:
-        os.killpg(pgid, signal.SIGTERM)
-    except ProcessLookupError:
-        return False
-    deadline = time.monotonic() + 0.25
-    while time.monotonic() < deadline:
-        # Reap the leader so its zombie does not keep an empty group alive.
-        # Still inspect the group: surviving children need cleanup too.
-        process.poll()
-        if not _group_exists(pgid):
-            return True
-        time.sleep(0.01)
-    try:
-        os.killpg(pgid, signal.SIGKILL)
-    except ProcessLookupError:
-        pass
-    return True
+    """Compatibility seam for callers that test the cleanup policy."""
+
+    return cleanup_process_group(process)
 
 
 def _read_problem(path: Path) -> tuple[dict[str, str] | None, bool]:
@@ -177,23 +136,14 @@ def launch(
         return launch_error(error)
     try:
         try:
-            launch_argv = argv
-            if os.name == "nt":
-                executable = shutil.which(argv[0])
-                if executable is not None:
-                    launch_argv = (executable, *argv[1:])
             process = subprocess.Popen(
-                launch_argv,
+                resolve_command(argv),
                 cwd=workdir,
                 env=env,
                 stdin=subprocess.DEVNULL,
                 stdout=stdout,
                 stderr=stderr,
-                **(
-                    {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
-                    if os.name == "nt"
-                    else {"start_new_session": True}
-                ),
+                **process_creation_options(),
             )
         except OSError as error:
             return launch_error(error)
