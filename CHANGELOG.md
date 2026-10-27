@@ -6,13 +6,15 @@ so callers can update and decide whether existing run directories remain usable.
 
 ## 0.2.1 - 2026-10-27
 
-First published release. Identical to 0.2.0 except that `uv.lock`, which the
-sdist includes, no longer carries machine-local `exclude-newer` options that
-made `uv sync --locked` fail on other machines.
+Identical to 0.2.0 except that `uv.lock`, which the sdist includes, no longer
+carries machine-local `exclude-newer` options that made `uv sync --locked`
+fail on other machines. Installing 0.2.0 was unaffected; prefer 0.2.1 when
+working from the sdist.
 
 ## 0.2.0 - 2026-10-27
 
-Tagged but not published. Version 0.1.0 was never published either.
+First release with the changes below. Version 0.1.0, published on 2026-10-20,
+was an earlier development snapshot without a changelog.
 
 - Execution contract: caller-written Python workflows launch subprocess
   workers with fresh per-launch paths, durable launch reservations, bounded
