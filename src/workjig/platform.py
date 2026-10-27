@@ -15,6 +15,11 @@ import time
 from pathlib import Path
 from typing import Any, BinaryIO, Protocol
 
+# Python exposes this constant on Windows, but keeping the documented value
+# available on other hosts lets us exercise the Windows policy without
+# importing or executing Windows-only APIs.
+_CREATE_NEW_PROCESS_GROUP = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+
 
 class FileLock(Protocol):
     """The platform operations required by the run ownership lock."""
@@ -86,7 +91,7 @@ def process_creation_options() -> dict[str, Any]:
     """Return subprocess options that give each worker its own process group."""
 
     if os.name == "nt":
-        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+        return {"creationflags": _CREATE_NEW_PROCESS_GROUP}
     return {"start_new_session": True}
 
 

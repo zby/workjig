@@ -24,7 +24,7 @@ def test_windows_process_creation_uses_a_new_process_group(
     monkeypatch.setattr(platform, "os", SimpleNamespace(name="nt"))
 
     assert platform.process_creation_options() == {
-        "creationflags": platform.subprocess.CREATE_NEW_PROCESS_GROUP
+        "creationflags": platform._CREATE_NEW_PROCESS_GROUP
     }
 
 
