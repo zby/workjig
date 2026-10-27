@@ -2,27 +2,51 @@
 
 from __future__ import annotations
 
+import json
 import math
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from datetime import datetime
+from enum import StrEnum
 from pathlib import Path
 from types import MappingProxyType
 from typing import Literal
 
+
+class LaunchStatus(StrEnum):
+    """Lifecycle of one launch reservation, from reservation to a settled outcome."""
+
+    RESERVED = "reserved"
+    RUNNING = "running"
+    DELIVERED = "delivered"
+    INCOMPLETE = "incomplete"
+    WORKER_PROBLEM = "worker_problem"
+    USAGE_LIMIT = "usage_limit"
+    PROCESS_ERROR = "process_error"
+    TIMEOUT = "timeout"
+    LAUNCH_ERROR = "launch_error"
+    INTERRUPTED = "interrupted"
+    PROTOCOL_ERROR = "protocol_error"
+
+
+UNSETTLED_STATUSES = frozenset({LaunchStatus.RESERVED, LaunchStatus.RUNNING})
 FAILURE_STATUSES = frozenset(
     {
-        "incomplete",
-        "worker_problem",
-        "usage_limit",
-        "process_error",
-        "timeout",
-        "launch_error",
-        "interrupted",
-        "protocol_error",
+        LaunchStatus.INCOMPLETE,
+        LaunchStatus.WORKER_PROBLEM,
+        LaunchStatus.USAGE_LIMIT,
+        LaunchStatus.PROCESS_ERROR,
+        LaunchStatus.TIMEOUT,
+        LaunchStatus.LAUNCH_ERROR,
+        LaunchStatus.INTERRUPTED,
+        LaunchStatus.PROTOCOL_ERROR,
     }
 )
-RETRYABLE_STATUSES = FAILURE_STATUSES - {"usage_limit", "protocol_error"}
+RETRYABLE_STATUSES = FAILURE_STATUSES - {LaunchStatus.USAGE_LIMIT, LaunchStatus.PROTOCOL_ERROR}
+_WORKER_PROBLEM_KINDS = frozenset({"unable", "usage_limit"})
+_PROBLEM_KINDS = _WORKER_PROBLEM_KINDS | {"launch_error", "operator_acknowledgment"}
+
 _SAFE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 _PATH_TOKENS = {
     "prompt",
@@ -56,6 +80,23 @@ def _positive_number(value: float | int, name: str) -> float:
     value = float(value)
     if not math.isfinite(value) or value <= 0:
         raise ValueError(f"{name} must be a positive finite number")
+    return value
+
+
+def _nonempty_text(value: object, name: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"{name} must be nonempty text")
+    return value
+
+
+def _optional_timestamp(value: object, name: str) -> str | None:
+    if value is None:
+        return None
+    try:
+        if not isinstance(value, str) or datetime.fromisoformat(value).tzinfo is None:
+            raise ValueError("expected timezone-aware timestamp")
+    except ValueError as error:
+        raise ValueError(f"invalid {name}: {error}") from error
     return value
 
 
@@ -179,12 +220,16 @@ class Request:
 
 @dataclass(frozen=True)
 class LaunchRecord:
-    """One launch reservation and its execution evidence, whether or not it started."""
+    """One launch reservation and its execution evidence, whether or not it started.
+
+    Construction validates field types and the lifecycle invariants of the
+    status, so every emitted and every loaded record satisfies the same rules.
+    """
 
     launch_id: str
-    status: str
+    status: LaunchStatus
     launch_dir: str
-    argv: tuple[str, ...] | None = None
+    argv: tuple[str, ...]
     pid: int | None = None
     returncode: int | None = None
     started_at: str | None = None
@@ -198,13 +243,127 @@ class LaunchRecord:
     resumed_usage_stop: str | None = None
 
     def __post_init__(self) -> None:
-        if self.argv is not None:
-            object.__setattr__(self, "argv", tuple(self.argv))
-        if self.problem is not None:
-            object.__setattr__(self, "problem", _freeze_json(self.problem))
-        if self.evidence is not None:
-            object.__setattr__(self, "evidence", _freeze_json(self.evidence))
-        object.__setattr__(self, "missing_outputs", tuple(self.missing_outputs))
+        _nonempty_text(self.launch_id, "launch_id")
+        _nonempty_text(self.launch_dir, "launch_dir")
+        try:
+            status = LaunchStatus(self.status)
+        except ValueError as error:
+            raise ValueError(f"invalid launch status: {self.status!r}") from error
+        argv = tuple(self.argv)
+        if not argv or not all(isinstance(arg, str) and arg for arg in argv):
+            raise ValueError("argv must contain nonempty strings")
+        for name in ("pid", "returncode"):
+            number = getattr(self, name)
+            if number is not None and (type(number) is not int or (name == "pid" and number <= 0)):
+                raise ValueError(f"invalid {name}")
+        _optional_timestamp(self.started_at, "started_at")
+        _optional_timestamp(self.finished_at, "finished_at")
+        problem = self.problem
+        if problem is not None:
+            if (
+                not isinstance(problem, Mapping)
+                or set(problem) != {"kind", "message"}
+                or not all(isinstance(item, str) for item in problem.values())
+                or problem["kind"] not in _PROBLEM_KINDS
+            ):
+                raise ValueError("invalid problem")
+            problem = _freeze_json(dict(problem))
+        evidence = self.evidence
+        if evidence is not None:
+            if not isinstance(evidence, Mapping):
+                raise ValueError("invalid evidence")
+            try:
+                json.dumps(thaw_json(evidence), allow_nan=False)
+            except (TypeError, ValueError) as error:
+                raise ValueError("invalid evidence") from error
+            evidence = _freeze_json(evidence)
+        missing = tuple(self.missing_outputs)
+        if not all(isinstance(name, str) and name for name in missing) or len(set(missing)) != len(
+            missing
+        ):
+            raise ValueError("invalid missing_outputs")
+        timeout = _positive_number(self.timeout_seconds, "timeout_seconds")
+        if type(self.max_launches) is not int or self.max_launches < 1:
+            raise ValueError("max_launches must be a positive integer")
+        if not isinstance(self.retry, RetryPolicy):
+            raise ValueError("retry must be a RetryPolicy")
+        if self.resumed_usage_stop is not None:
+            _nonempty_text(self.resumed_usage_stop, "resumed_usage_stop")
+        object.__setattr__(self, "status", status)
+        object.__setattr__(self, "argv", argv)
+        object.__setattr__(self, "problem", problem)
+        object.__setattr__(self, "evidence", evidence)
+        object.__setattr__(self, "missing_outputs", missing)
+        object.__setattr__(self, "timeout_seconds", timeout)
+        if not self._lifecycle_consistent():
+            raise ValueError(f"inconsistent {status.value} launch record")
+
+    def _lifecycle_consistent(self) -> bool:
+        """The single statement of which evidence each status must carry.
+
+        harness.launch and Run.acknowledge_stopped emit records that satisfy
+        these rules; loading a run record checks them again.
+        """
+        status = self.status
+        started = self.started_at is not None
+        finished = self.finished_at is not None
+        has_pid = self.pid is not None
+        exited = self.returncode is not None
+        kind = self.problem["kind"] if self.problem is not None else None
+        bare = kind is None and self.evidence is None and not self.missing_outputs
+        if status in UNSETTLED_STATUSES:
+            running = status == LaunchStatus.RUNNING
+            return (
+                bare and not exited and not finished and has_pid == running and started == running
+            )
+        if status == LaunchStatus.INTERRUPTED:
+            return (
+                finished
+                and not exited
+                and has_pid == started
+                and kind == "operator_acknowledgment"
+                and self.evidence is None
+                and not self.missing_outputs
+            )
+        if status == LaunchStatus.LAUNCH_ERROR:
+            return (
+                started
+                and finished
+                and not has_pid
+                and not exited
+                and kind == "launch_error"
+                and self.evidence is None
+                and not self.missing_outputs
+            )
+        consistent = (
+            has_pid
+            and exited
+            and started
+            and finished
+            and (kind is None or kind in _WORKER_PROBLEM_KINDS)
+            and (
+                not self.missing_outputs
+                or status in {LaunchStatus.INCOMPLETE, LaunchStatus.PROTOCOL_ERROR}
+            )
+        )
+        if status in {LaunchStatus.DELIVERED, LaunchStatus.INCOMPLETE}:
+            consistent = (
+                consistent
+                and self.returncode == 0
+                and kind is None
+                and bool(self.missing_outputs) == (status == LaunchStatus.INCOMPLETE)
+            )
+        if status == LaunchStatus.WORKER_PROBLEM:
+            consistent = consistent and kind == "unable"
+        return consistent
+
+
+def thaw_json(value: object) -> object:
+    if isinstance(value, Mapping):
+        return {key: thaw_json(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [thaw_json(item) for item in value]
+    return value
 
 
 @dataclass(frozen=True)

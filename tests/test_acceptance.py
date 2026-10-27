@@ -524,8 +524,8 @@ def test_failed_result_commit_poisoned_controller_until_reopen(
         def fail_delivered_commit() -> None:
             nonlocal injected
             state = run._state
-            entries = state["calls"].get("commit", {}) if state is not None else {}
-            if not injected and any(entry["result"] is not None for entry in entries.values()):
+            entries = state.calls.get("commit", {}) if state is not None else {}
+            if not injected and any(entry.delivery is not None for entry in entries.values()):
                 injected = True
                 raise OSError("injected failure before atomic result commit")
             original_write()

@@ -440,7 +440,7 @@ def test_completed_record_survives_exit_after_atomic_commit(tmp_path: Path) -> N
         "def after_commit(self):\n"
         "    original(self)\n"
         "    state = self._state\n"
-        "    if any(e['result'] is not None for v in state['calls'].values() "
+        "    if any(e.delivery is not None for v in state.calls.values() "
         "for e in v.values()):\n"
         "        os._exit(23)\n"
         "Run._write_state = after_commit\n"

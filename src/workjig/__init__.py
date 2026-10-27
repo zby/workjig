@@ -2,7 +2,8 @@
 
 from .locking import RunBusyError, busy, hold
 from .models import CallResult, CommandWorker, LaunchRecord, Request, RetryPolicy
-from .run import RecordError, Run, UncertainLaunchError
+from .records import RecordError
+from .run import Run, UncertainLaunchError
 
 __all__ = [
     "LaunchRecord",

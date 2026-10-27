@@ -11,7 +11,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
-from .models import LaunchRecord, Request
+from .models import LaunchRecord, LaunchStatus, Request
 from .outcomes import terminal_failure
 from .platform import cleanup_process_group, process_creation_options, resolve_command
 
@@ -118,7 +118,7 @@ def launch(
         return (
             replace(
                 reserved,
-                status="launch_error",
+                status=LaunchStatus.LAUNCH_ERROR,
                 argv=argv,
                 started_at=started_at,
                 finished_at=_now(),
@@ -170,41 +170,40 @@ def launch(
     finally:
         files.close()
 
-    status = "delivered"
+    status = LaunchStatus.DELIVERED
     problem, invalid_problem = _read_problem(paths["problem_file"])
     evidence = _read_evidence(paths["evidence_file"])
     outputs: dict[str, str] = {}
     missing: list[str] = []
-    # Keep emitted invariants consistent with run._attempt_from_dict; preserve
-    # compatibility with records produced by earlier classification rules.
+    # LaunchRecord construction below enforces the lifecycle invariants.
     harness_failure = (
         terminal_failure(request.worker.output_protocol, stdout_path)
         if request.worker.output_protocol is not None and not timed_out
         else None
     )
     if timed_out:
-        status = "timeout"
+        status = LaunchStatus.TIMEOUT
     elif harness_failure == "usage_limit" or (
         problem is not None and problem["kind"] == "usage_limit"
     ):
-        status = "usage_limit"
+        status = LaunchStatus.USAGE_LIMIT
     elif group_lingered:
-        status = "process_error"
+        status = LaunchStatus.PROCESS_ERROR
     elif invalid_problem:
-        status = "protocol_error"
+        status = LaunchStatus.PROTOCOL_ERROR
     elif problem is not None:
-        status = "worker_problem"
+        status = LaunchStatus.WORKER_PROBLEM
     elif process.returncode != 0 or harness_failure is not None:
-        status = "process_error"
+        status = LaunchStatus.PROCESS_ERROR
     else:
         if paths["output_dir"].is_symlink():
-            status = "protocol_error"
+            status = LaunchStatus.PROTOCOL_ERROR
         for name in request.required_outputs + request.optional_outputs:
-            if status != "delivered":
+            if status != LaunchStatus.DELIVERED:
                 break
             path = paths["output_dir"] / name
             if path.is_symlink():
-                status = "protocol_error"
+                status = LaunchStatus.PROTOCOL_ERROR
                 break
             if not path.is_file():
                 if name in request.required_outputs:
@@ -213,11 +212,11 @@ def launch(
             try:
                 outputs[name] = path.read_text(encoding="utf-8")
             except (OSError, UnicodeError):
-                status = "protocol_error"
+                status = LaunchStatus.PROTOCOL_ERROR
                 break
-        if status == "delivered" and missing:
-            status = "incomplete"
-    if status != "delivered":
+        if status == LaunchStatus.DELIVERED and missing:
+            status = LaunchStatus.INCOMPLETE
+    if status != LaunchStatus.DELIVERED:
         outputs = {}
     return (
         replace(
