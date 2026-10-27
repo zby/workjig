@@ -79,10 +79,8 @@ def sync_directory(path: Path) -> None:
 
 
 def resolve_command(argv: tuple[str, ...]) -> tuple[str, ...]:
-    """Resolve a console executable on Windows without changing the command contract."""
+    """Resolve a console executable through PATH without changing the command contract."""
 
-    if os.name != "nt":
-        return argv
     executable = shutil.which(argv[0])
     return (executable, *argv[1:]) if executable is not None else argv
 

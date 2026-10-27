@@ -18,6 +18,14 @@ def test_windows_command_resolution_uses_path_lookup(monkeypatch: pytest.MonkeyP
 
 
 @pytest.mark.unit
+def test_posix_command_resolution_uses_path_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(platform, "os", SimpleNamespace(name="posix"))
+    monkeypatch.setattr(platform.shutil, "which", lambda _: "/tmp/bin/worker")
+
+    assert platform.resolve_command(("worker", "--flag")) == ("/tmp/bin/worker", "--flag")
+
+
+@pytest.mark.unit
 def test_windows_process_creation_uses_a_new_process_group(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
