@@ -23,14 +23,15 @@ from workjig.models import CommandWorker
 
 
 def _render(worker):
+    launch_dir = Path("launch-1")
     paths = {
-        "prompt": Path("/tmp/launch-1/prompt.txt"),
-        "input_dir": Path("/tmp/launch-1/inputs"),
-        "output_dir": Path("/tmp/launch-1/outputs"),
-        "problem_file": Path("/tmp/launch-1/problem.json"),
-        "evidence_file": Path("/tmp/launch-1/evidence.json"),
-        "launch_dir": Path("/tmp/launch-1"),
-        "workdir": Path("/tmp/project"),
+        "prompt": launch_dir / "prompt.txt",
+        "input_dir": launch_dir / "inputs",
+        "output_dir": launch_dir / "outputs",
+        "problem_file": launch_dir / "problem.json",
+        "evidence_file": launch_dir / "evidence.json",
+        "launch_dir": launch_dir,
+        "workdir": Path("project"),
     }
     return worker.command(paths)
 
@@ -44,7 +45,7 @@ def test_codex_command_has_explicit_model_sandbox_and_unattended_policy():
     assert "approval_policy=never" in command
     assert "model_reasoning_effort=medium" in command
     assert "--skip-git-repo-check" in command
-    assert "/tmp/launch-1/prompt.txt" in command[-1]
+    assert str(Path("launch-1") / "prompt.txt") in command[-1]
     assert "--dangerously-bypass-approvals-and-sandbox" not in command
     assert "--ignore-rules" not in command
 
@@ -58,7 +59,7 @@ def test_claude_command_requires_tool_choice_and_denies_unanswered_prompts():
     assert command[command.index("--permission-prompts") + 1] == "none"
     assert "--allowedTools=Read,Write" in command
     assert "--verbose" in command
-    assert "/tmp/launch-1/prompt.txt" in command[-1]
+    assert str(Path("launch-1") / "prompt.txt") in command[-1]
     assert "--dangerously-skip-permissions" not in command
     assert "--bare" not in command
 
@@ -75,14 +76,14 @@ def test_pi_command_requires_provider_tools_and_trust_choice():
     assert command[command.index("--model") + 1] == "gpt-6.1-sol"
     assert command[command.index("--tools") + 1] == "read,write"
     assert "--no-approve" in command
-    assert command[command.index("--session-dir") + 1] == "/tmp/launch-1"
-    assert "/tmp/launch-1/prompt.txt" in command[-1]
+    assert command[command.index("--session-dir") + 1] == str(Path("launch-1"))
+    assert str(Path("launch-1") / "prompt.txt") in command[-1]
 
 
 @pytest.mark.unit
 def test_command_rendering_keeps_literal_braces_while_replacing_path_tokens():
     command = _render(CommandWorker(argv=("worker", '{"literal": 1}', "{prompt}")))
-    assert command == ("worker", '{"literal": 1}', "/tmp/launch-1/prompt.txt")
+    assert command == ("worker", '{"literal": 1}', str(Path("launch-1") / "prompt.txt"))
 
 
 @pytest.mark.parametrize(
@@ -185,10 +186,14 @@ def test_claude_invalid_model_usage_is_not_model_evidence(usage):
 
 
 @pytest.mark.subprocess
+@pytest.mark.skipif(
+    os.name == "nt", reason="Windows does not execute extensionless harness fixtures"
+)
 def test_claude_smoke_script_with_deterministic_executable(tmp_path: Path):
-    executable = tmp_path / "bin" / "claude"
+    executable = tmp_path / "bin" / "claude.cmd"
+    script = tmp_path / "bin" / "claude.py"
     executable.parent.mkdir()
-    executable.write_text(
+    script.write_text(
         f"#!{sys.executable}\n"
         "import json, sys\n"
         "from pathlib import Path\n"
@@ -197,7 +202,7 @@ def test_claude_smoke_script_with_deterministic_executable(tmp_path: Path):
         "assert sys.argv[sys.argv.index('--permission-mode') + 1] == 'dontAsk'\n"
         "prompt = Path(sys.argv[-1].split('`')[1]).read_text()\n"
         "paths = [Path(line.split(': ', 1)[1]) for line in prompt.splitlines()\n"
-        "    if line.startswith('- ') and ': /' in line]\n"
+        "    if line.startswith('- ') and ': ' in line]\n"
         "source = next(path for path in paths if path.name == 'source.txt')\n"
         "output = next(path for path in paths if path.name == 'answer.txt')\n"
         "output.write_bytes(source.read_bytes())\n"
@@ -205,7 +210,11 @@ def test_claude_smoke_script_with_deterministic_executable(tmp_path: Path):
         "print(json.dumps({'type': 'result', 'subtype': 'success', 'is_error': False,\n"
         "    'session_id': 'synthetic', 'modelUsage': {'synthetic-haiku': {'inputTokens': 5}}}))\n"
     )
-    executable.chmod(0o755)
+    if os.name == "nt":
+        executable.write_text(f'@echo off\n"{sys.executable}" "%~dp0claude.py" %*\n')
+    else:
+        executable = script
+        executable.chmod(0o755)
     workdir = tmp_path / "probe"
     completed = subprocess.run(
         [
