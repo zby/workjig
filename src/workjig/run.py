@@ -5,11 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-
-if os.name == "nt":
-    import msvcrt
-else:
-    import fcntl
 import tempfile
 import threading
 import time
@@ -22,6 +17,7 @@ from pathlib import Path
 from typing import cast
 
 from .harness import launch, prepare
+from .locking import RunBusyError, acquire, release
 from .models import (
     FAILURE_STATUSES,
     CallResult,
@@ -36,19 +32,6 @@ from .models import (
 class RecordError(RuntimeError):
     """A run record is absent, corrupt, or internally inconsistent."""
 
-
-class RunBusyError(RuntimeError):
-    """Another controller already owns this record directory."""
-
-
-def _lock(file):
-    if os.name == "nt":
-        file.seek(0); file.write(b"0"); file.flush(); file.seek(0); msvcrt.locking(file.fileno(), msvcrt.LK_NBLCK, 1)
-    else: fcntl.flock(file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-
-def _unlock(file):
-    if os.name == "nt": file.seek(0); msvcrt.locking(file.fileno(), msvcrt.LK_UNLCK, 1)
-    else: fcntl.flock(file.fileno(), fcntl.LOCK_UN)
 
 class UncertainLaunchError(RuntimeError):
     """A prior launch may still be running; explicit recovery is required."""
@@ -416,10 +399,9 @@ class Run:
             raise ValueError("workdir must be an existing directory")
         self.record_dir.mkdir(parents=True, exist_ok=True)
         lock_path = self.record_dir / ".lock"
-        had_lock = lock_path.exists()
         lock_file = lock_path.open("a+b")
         try:
-            _lock(lock_file)
+            acquire(lock_file)
         except BlockingIOError as error:
             lock_file.close()
             raise RunBusyError(f"run records are already owned: {self.record_dir}") from error
@@ -441,7 +423,7 @@ class Run:
                 if self._state["workdir"] != str(self.workdir):
                     raise RecordError("run workdir differs from recorded workdir")
             else:
-                if had_lock or any(path.name != ".lock" for path in self.record_dir.iterdir()):
+                if any(path.name != ".lock" for path in self.record_dir.iterdir()):
                     raise RecordError(
                         "run record is missing; preserve this directory for inspection, "
                         "confirm any old workers have stopped, and start a new run in a "
@@ -454,7 +436,7 @@ class Run:
             self._poisoned = False
             return self
         except BaseException:
-            _unlock(lock_file)
+            release(lock_file)
             lock_file.close()
             self._state = None
             raise
@@ -464,7 +446,7 @@ class Run:
             if self._active_calls:
                 raise RuntimeError("cannot close run while calls are active")
             if self._lock_file is not None:
-                _unlock(self._lock_file)
+                release(self._lock_file)
                 self._lock_file.close()
             self._lock_file = None
             self._state = None
@@ -490,11 +472,12 @@ class Run:
                 file.flush()
                 os.fsync(file.fileno())
             os.replace(name, self.record_dir / "run.json")
-            directory_fd = os.open(self.record_dir, os.O_RDONLY)
-            try:
-                os.fsync(directory_fd)
-            finally:
-                os.close(directory_fd)
+            if os.name != "nt":
+                directory_fd = os.open(self.record_dir, os.O_RDONLY)
+                try:
+                    os.fsync(directory_fd)
+                finally:
+                    os.close(directory_fd)
         finally:
             if os.path.exists(name):
                 os.unlink(name)

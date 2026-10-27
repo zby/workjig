@@ -254,3 +254,7 @@ uv run python examples/smoke_harness.py claude /tmp/my-claude-probe --model haik
 ```
 
 `--model` applies only to single-harness commands, not `all`.
+
+### Shared run lock
+
+Use workjig.hold(record_dir) to hold the run ownership lock while updating files beside the records. workjig.busy(record_dir) probes whether another process currently holds it. Both use the same non-blocking lock as Run; RunBusyError is raised on contention. The lock is released automatically when the context exits or the process terminates.

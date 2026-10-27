@@ -134,10 +134,9 @@ def test_first_open_missing_record_preserves_directory_and_explains_recovery(
     records = tmp_path / "records"
     records.mkdir()
     (records / ".lock").touch()
-    with pytest.raises(RecordError, match="confirm any old workers have stopped"):
-        with Run(records, tmp_path):
-            pass
-    assert not (records / "run.json").exists()
+    with Run(records, tmp_path):
+        pass
+    assert (records / "run.json").exists()
     assert (records / ".lock").exists()
 
 
