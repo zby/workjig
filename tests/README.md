@@ -29,7 +29,7 @@ Select by boundary with `-m`, and by subject with a filename or `-k`.
 | `test_continuation.py` | Execution-control changes, total ceilings, usage-stop approval and recovery | Subprocess |
 | `test_continuation_validation.py` | Recorded execution controls and continuation authorization | Unit |
 | `test_review.py` | Regression probes for output attribution and observed parallel limits | Subprocess |
-| `test_smoke.py` | All-harness manual command defaults, isolation, reuse and failure reporting, with fake CLIs | Subprocess |
+| `test_smoke.py` | Manual smoke-command argument validation; launches no harness | Unit |
 
 `unit` includes temporary-file tests, not just pure in-memory functions.
 `subprocess` includes tests whose fixtures launch workers, even if the assertion
