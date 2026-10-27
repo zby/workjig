@@ -61,6 +61,7 @@ def prepare(
 
 
 def _group_exists(pgid: int) -> bool:
+    if os.name == "nt": return False
     try:
         os.killpg(pgid, 0)
     except ProcessLookupError:
@@ -70,6 +71,9 @@ def _group_exists(pgid: int) -> bool:
 
 def _cleanup_group(process: subprocess.Popen[bytes]) -> bool:
     """Terminate descendants even if the leader has already exited."""
+    if os.name == "nt":
+        if process.poll() is None: subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False); return True
+        return False
     pgid = process.pid
     process.poll()
     if not _group_exists(pgid):
@@ -171,7 +175,7 @@ def launch(
                 stdin=subprocess.DEVNULL,
                 stdout=stdout,
                 stderr=stderr,
-                start_new_session=True,
+                **({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt" else {"start_new_session": True}),
             )
         except OSError as error:
             return launch_error(error)
