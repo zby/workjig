@@ -58,6 +58,8 @@ Our [design rationale](docs/design-rationale.md) explains the local tradeoffs.
 
 ## A call
 
+Install from PyPI with `pip install workjig` or `uv add workjig`.
+
 ```python
 import sys
 from pathlib import Path

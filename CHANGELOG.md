@@ -1,0 +1,31 @@
+# Changelog
+
+Workjig is in early development: releases may change the public API and the
+persisted run-record format without migration. Each entry states what changed
+so callers can update and decide whether existing run directories remain usable.
+
+## 0.2.0 - 2026-10-27
+
+First published release. Version 0.1.0 was never published.
+
+- Execution contract: caller-written Python workflows launch subprocess
+  workers with fresh per-launch paths, durable launch reservations, bounded
+  retries, explicit recovery of unresolved launches and atomic result records.
+  See `docs/design.md`.
+- Adapters for headless harness CLIs: Codex 0.162.1, Claude Code 2.1.303 and
+  Pi 1.3.0, with terminal-failure classification of their JSON output. Generic
+  commands use exit status and the file protocol only. See
+  `docs/harness-evidence.md` for what was tested against real binaries.
+- Run record format version 2. Older formats are rejected.
+- `LaunchStatus` string enum exported; `CallResult.status` and
+  `LaunchRecord.status` are its members and still compare equal to the plain
+  status strings.
+- `WorkjigError` is the common base of `RecordError`, `UncertainLaunchError`
+  and `RunBusyError`.
+- Work identity is derived from every `Request` field that is not a declared
+  execution control, so new fields cannot be omitted from the request hash.
+  Hashes of existing requests are unchanged.
+- `LaunchRecord.argv` is required; records without it were never valid.
+- Internal: typed run state in `workjig.records`, lifecycle invariants checked
+  on `LaunchRecord` construction, one lock acquisition path for `Run`, `hold`
+  and `busy`.
