@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import cast
 
 from .harness import launch, prepare
-from .locking import RunBusyError, acquire, release
+from .locking import _HOLD_MARKER, RunBusyError, acquire, release
 from .models import (
     FAILURE_STATUSES,
     CallResult,
@@ -399,6 +399,7 @@ class Run:
             raise ValueError("workdir must be an existing directory")
         self.record_dir.mkdir(parents=True, exist_ok=True)
         lock_path = self.record_dir / ".lock"
+        had_lock = lock_path.exists()
         lock_file = lock_path.open("a+b")
         try:
             acquire(lock_file)
@@ -423,7 +424,11 @@ class Run:
                 if self._state["workdir"] != str(self.workdir):
                     raise RecordError("run workdir differs from recorded workdir")
             else:
-                if any(path.name != ".lock" for path in self.record_dir.iterdir()):
+                lock_file.seek(0)
+                lock_marker = lock_file.read(len(_HOLD_MARKER))
+                if (had_lock and lock_marker != _HOLD_MARKER) or any(
+                    path.name != ".lock" for path in self.record_dir.iterdir()
+                ):
                     raise RecordError(
                         "run record is missing; preserve this directory for inspection, "
                         "confirm any old workers have stopped, and start a new run in a "

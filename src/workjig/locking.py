@@ -36,16 +36,25 @@ def release(file: BinaryIO) -> None:
         fcntl.flock(file.fileno(), fcntl.LOCK_UN)
 
 
+_HOLD_MARKER = b"WJH"
+
+
 class HeldLock:
+    """Context manager for the shared run ownership lock."""
+
     def __init__(self, record_dir: Path) -> None:
         self.path = Path(record_dir)
         self.file: BinaryIO | None = None
 
     def __enter__(self) -> Path:
         self.path.mkdir(parents=True, exist_ok=True)
-        self.file = (self.path / ".lock").open("a+b")
+        lock_path = self.path / ".lock"
+        self.file = lock_path.open("r+b") if lock_path.exists() else lock_path.open("w+b")
         try:
             acquire(self.file)
+            self.file.seek(0)
+            self.file.write(_HOLD_MARKER)
+            self.file.flush()
         except BlockingIOError as error:
             self.file.close()
             self.file = None
@@ -54,16 +63,20 @@ class HeldLock:
 
     def __exit__(self, *_: object) -> None:
         if self.file is not None:
-            release(self.file)
-            self.file.close()
-            self.file = None
+            try:
+                release(self.file)
+            finally:
+                self.file.close()
+                self.file = None
 
 
 def hold(record_dir: Path) -> HeldLock:
+    """Hold the shared run lock without opening or validating run records."""
     return HeldLock(Path(record_dir))
 
 
 def busy(record_dir: Path) -> bool:
+    """Return whether another process currently owns the shared run lock."""
     lock_path = Path(record_dir) / ".lock"
     if not lock_path.exists():
         return False

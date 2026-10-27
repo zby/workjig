@@ -186,9 +186,6 @@ def test_claude_invalid_model_usage_is_not_model_evidence(usage):
 
 
 @pytest.mark.subprocess
-@pytest.mark.skipif(
-    os.name == "nt", reason="Windows does not execute extensionless harness fixtures"
-)
 def test_claude_smoke_script_with_deterministic_executable(tmp_path: Path):
     executable = tmp_path / "bin" / "claude.cmd"
     script = tmp_path / "bin" / "claude.py"
