@@ -134,6 +134,8 @@ not a continuation of the old launch allowance.
 
 `CallResult.launches` contains immutable `LaunchRecord` values, one per launch
 reservation. A record can exist even when the subprocess did not start.
+`CallResult.status` and `LaunchRecord.status` are `LaunchStatus` members, a
+string enum, so comparisons with plain strings such as `"delivered"` work.
 
 `CallResult.failed_at_launch_limit` is true only when delivery failed and all
 launch allowance was spent. False does not imply retryability: delivery may
@@ -199,7 +201,8 @@ allowance and an explicit retry policy including `interrupted`. The caller may
 increase the total ceiling and update retry policy to authorize continuation,
 but already spent launches remain spent. Otherwise start a new run deliberately.
 
-Corrupt records raise `RecordError`. A persistence failure can poison the
+Corrupt records raise `RecordError`. `RecordError`, `UncertainLaunchError` and
+`RunBusyError` all derive from `WorkjigError`. A persistence failure can poison the
 current controller: close and reopen it before inspection or recovery. Never
 delete a reservation merely to suppress uncertainty.
 An exception or keyboard interruption after reservation also requires explicit

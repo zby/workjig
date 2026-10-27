@@ -19,32 +19,40 @@ from .models import (
     LaunchStatus,
     Request,
     RetryPolicy,
+    WorkjigError,
     thaw_json,
 )
 
 RECORD_VERSION = 2
 _LAUNCH_FIELDS = frozenset(item.name for item in fields(LaunchRecord))
+# Work material is every Request field that is neither the call key nor a
+# declared execution control, so a new field cannot be left out by mistake.
+_WORK_FIELDS = tuple(
+    item.name
+    for item in fields(Request)
+    if item.name != "call_id" and not item.metadata.get("execution_control")
+)
+_WORKER_FIELDS = tuple(item.name for item in fields(CommandWorker))
 
 
-class RecordError(RuntimeError):
+class RecordError(WorkjigError):
     """A run record is absent, corrupt, or internally inconsistent."""
+
+
+def _plain(value: object) -> object:
+    """JSON-shaped copy of a frozen value, with the same spelling run.json uses."""
+    if isinstance(value, CommandWorker):
+        return {name: _plain(getattr(value, name)) for name in _WORKER_FIELDS}
+    if isinstance(value, Mapping):
+        return {key: _plain(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [_plain(item) for item in value]
+    return value
 
 
 def request_material(request: Request) -> dict[str, object]:
     """Identity-bearing work material; execution controls are excluded."""
-    return {
-        "task": request.task,
-        "inputs": dict(request.inputs),
-        "required_outputs": list(request.required_outputs),
-        "optional_outputs": list(request.optional_outputs),
-        "worker": {
-            "name": request.worker.name,
-            "argv": list(request.worker.argv),
-            "env": dict(request.worker.env),
-            "evidence_file": request.worker.evidence_file,
-            "output_protocol": request.worker.output_protocol,
-        },
-    }
+    return {name: _plain(getattr(request, name)) for name in _WORK_FIELDS}
 
 
 def material_hash(material: Mapping[str, object]) -> str:
@@ -55,32 +63,16 @@ def material_hash(material: Mapping[str, object]) -> str:
 
 
 def _request_from_material(call_id: str, material: object) -> Request:
-    if not isinstance(material, dict) or set(material) != {
-        "task",
-        "inputs",
-        "required_outputs",
-        "optional_outputs",
-        "worker",
-    }:
+    if not isinstance(material, dict) or set(material) != set(_WORK_FIELDS):
         raise RecordError("invalid request material")
     worker = material["worker"]
-    worker_fields = {"name", "argv", "env", "evidence_file", "output_protocol"}
-    if not isinstance(worker, dict) or set(worker) != worker_fields:
+    if not isinstance(worker, dict) or set(worker) != set(_WORKER_FIELDS):
         raise RecordError("invalid worker material")
     try:
         request = Request(
             call_id=call_id,
-            task=material["task"],
-            inputs=material["inputs"],
-            required_outputs=tuple(material["required_outputs"]),
-            optional_outputs=tuple(material["optional_outputs"]),
-            worker=CommandWorker(
-                argv=tuple(worker["argv"]),
-                name=worker["name"],
-                env=worker["env"],
-                evidence_file=worker["evidence_file"],
-                output_protocol=worker["output_protocol"],
-            ),
+            **{name: material[name] for name in _WORK_FIELDS if name != "worker"},
+            worker=CommandWorker(**worker),
         )
     except (KeyError, TypeError, ValueError) as error:
         raise RecordError(f"invalid request material: {error}") from error

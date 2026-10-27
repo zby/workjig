@@ -6,10 +6,11 @@ import os
 from pathlib import Path
 from typing import BinaryIO
 
+from .models import WorkjigError
 from .platform import file_lock
 
 
-class RunBusyError(RuntimeError):
+class RunBusyError(WorkjigError):
     """Another controller already owns that record directory."""
 
 

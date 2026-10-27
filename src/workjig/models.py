@@ -14,6 +14,10 @@ from types import MappingProxyType
 from typing import Literal
 
 
+class WorkjigError(RuntimeError):
+    """Base of every error the runtime raises about records, locks or recovery."""
+
+
 class LaunchStatus(StrEnum):
     """Lifecycle of one launch reservation, from reservation to a settled outcome."""
 
@@ -172,17 +176,28 @@ def _replace_tokens(arg: str, paths: Mapping[str, Path]) -> str:
     return _PATH_TOKEN_RE.sub(lambda match: str(paths[match.group(1)]), arg)
 
 
+# Field metadata marking a Request field as an execution control.
+EXECUTION_CONTROL = {"execution_control": True}
+
+
 @dataclass(frozen=True)
 class Request:
+    """One logical call: identity-bearing work material plus execution controls.
+
+    Every field except call_id is work material unless its field metadata is
+    ``EXECUTION_CONTROL``. Work material determines reuse; execution controls
+    only govern future launches of the same work.
+    """
+
     call_id: str
     task: str
     inputs: Mapping[str, str]
     required_outputs: tuple[str, ...]
     worker: CommandWorker
     optional_outputs: tuple[str, ...] = ()
-    timeout_seconds: float = 300.0
-    max_launches: int = 1
-    retry: RetryPolicy = field(default_factory=RetryPolicy)
+    timeout_seconds: float = field(default=300.0, metadata=EXECUTION_CONTROL)
+    max_launches: int = field(default=1, metadata=EXECUTION_CONTROL)
+    retry: RetryPolicy = field(default_factory=RetryPolicy, metadata=EXECUTION_CONTROL)
 
     def __post_init__(self) -> None:
         if not isinstance(self.call_id, str) or not self.call_id or "\x00" in self.call_id:
@@ -377,12 +392,13 @@ class CallResult:
 
     call_id: str
     request_hash: str
-    status: str
+    status: LaunchStatus
     outputs: Mapping[str, str]
     launches: tuple[LaunchRecord, ...]
     failed_at_launch_limit: bool
     reused: bool = False
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "status", LaunchStatus(self.status))
         object.__setattr__(self, "outputs", MappingProxyType(dict(self.outputs)))
         object.__setattr__(self, "launches", tuple(self.launches))

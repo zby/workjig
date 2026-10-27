@@ -1,12 +1,21 @@
 """Run headless LLM coding harnesses as subprocess workers with durable results."""
 
 from .locking import RunBusyError, busy, hold
-from .models import CallResult, CommandWorker, LaunchRecord, Request, RetryPolicy
+from .models import (
+    CallResult,
+    CommandWorker,
+    LaunchRecord,
+    LaunchStatus,
+    Request,
+    RetryPolicy,
+    WorkjigError,
+)
 from .records import RecordError
 from .run import Run, UncertainLaunchError
 
 __all__ = [
     "LaunchRecord",
+    "LaunchStatus",
     "CallResult",
     "CommandWorker",
     "RecordError",
@@ -17,4 +26,5 @@ __all__ = [
     "hold",
     "busy",
     "UncertainLaunchError",
+    "WorkjigError",
 ]

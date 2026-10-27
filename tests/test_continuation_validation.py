@@ -4,7 +4,16 @@ from dataclasses import replace
 
 import pytest
 
-from workjig import CommandWorker, LaunchRecord, RecordError, Request, RetryPolicy
+from workjig import (
+    CommandWorker,
+    LaunchRecord,
+    RecordError,
+    Request,
+    RetryPolicy,
+    RunBusyError,
+    UncertainLaunchError,
+    WorkjigError,
+)
 from workjig.records import RunState, launch_to_json, material_hash, request_material
 
 pytestmark = pytest.mark.unit
@@ -116,3 +125,38 @@ def test_third_launch_cannot_use_ceiling_two(state):
     entry["attempts"] = [launch_to_json(first), launch_to_json(second), third]
     with pytest.raises(RecordError, match="allowance exceeded"):
         RunState.from_json(state)
+
+
+def test_work_material_is_every_request_field_except_controls():
+    request = Request(
+        "job",
+        "Write answer",
+        {"in.txt": "x"},
+        ("answer.txt",),
+        CommandWorker(("worker",), env={"K": "V"}),
+        optional_outputs=("extra.txt",),
+        timeout_seconds=5,
+        max_launches=3,
+        retry=RetryPolicy(("timeout",), 1),
+    )
+    assert request_material(request) == {
+        "task": "Write answer",
+        "inputs": {"in.txt": "x"},
+        "required_outputs": ["answer.txt"],
+        "optional_outputs": ["extra.txt"],
+        "worker": {
+            "name": "command",
+            "argv": ["worker"],
+            "env": {"K": "V"},
+            "evidence_file": None,
+            "output_protocol": None,
+        },
+    }
+    assert material_hash(request_material(request)) == material_hash(
+        request_material(replace(request, timeout_seconds=1, max_launches=1, retry=RetryPolicy()))
+    )
+
+
+def test_runtime_errors_share_a_base():
+    for error in (RecordError, UncertainLaunchError, RunBusyError):
+        assert issubclass(error, WorkjigError)

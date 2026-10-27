@@ -18,7 +18,14 @@ from typing import cast
 
 from .harness import launch, prepare
 from .locking import RunLock
-from .models import UNSETTLED_STATUSES, CallResult, LaunchRecord, LaunchStatus, Request
+from .models import (
+    UNSETTLED_STATUSES,
+    CallResult,
+    LaunchRecord,
+    LaunchStatus,
+    Request,
+    WorkjigError,
+)
 from .platform import sync_directory
 from .records import (
     CallEntry,
@@ -32,7 +39,7 @@ from .records import (
 __all__ = ["RecordError", "Run", "UncertainLaunchError"]
 
 
-class UncertainLaunchError(RuntimeError):
+class UncertainLaunchError(WorkjigError):
     """A prior launch may still be running; explicit recovery is required."""
 
     def __init__(self, launches: Iterable[LaunchRecord]) -> None:
@@ -356,7 +363,7 @@ class Run:
     def _result(self, entry: CallEntry, request: Request, reused: bool) -> CallResult:
         launches = tuple(entry.launches)
         if entry.delivery is not None:
-            status: str = LaunchStatus.DELIVERED
+            status = LaunchStatus.DELIVERED
             outputs: Mapping[str, str] = entry.delivery.outputs
         elif launches:
             status = launches[-1].status
