@@ -4,9 +4,15 @@ Workjig is in early development: releases may change the public API and the
 persisted run-record format without migration. Each entry states what changed
 so callers can update and decide whether existing run directories remain usable.
 
+## 0.2.1 - 2026-10-27
+
+First published release. Identical to 0.2.0 except that `uv.lock`, which the
+sdist includes, no longer carries machine-local `exclude-newer` options that
+made `uv sync --locked` fail on other machines.
+
 ## 0.2.0 - 2026-10-27
 
-First published release. Version 0.1.0 was never published.
+Tagged but not published. Version 0.1.0 was never published either.
 
 - Execution contract: caller-written Python workflows launch subprocess
   workers with fresh per-launch paths, durable launch reservations, bounded
