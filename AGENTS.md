@@ -41,7 +41,7 @@ invocations when making support claims.
   budgets belong to workflow code, not an implicit runtime correction loop.
 - Build on harness public interfaces; do not copy or patch their internals.
 - Keep the implementation small; add only what current work needs.
-- Do not maintain backward compatibility at this unpublished stage, including
+- Do not maintain backward compatibility at this early-development stage, including
   for public APIs and persisted run records. Do not add compatibility shims,
   legacy modes, or migrations; update callers and tests to the current contract
   instead. Reject incompatible record formats clearly rather than silently

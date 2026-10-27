@@ -33,7 +33,7 @@ Initial platform: Linux, Python 3.11 or newer.
 
 ### Compatibility
 
-Workjig is unpublished and under active development. We do not maintain backward
+Workjig is in early development. We do not maintain backward
 compatibility for the public API or persisted run-record format. Changes may
 require updating callers and starting fresh run directories; no migration of
 older records is promised.
