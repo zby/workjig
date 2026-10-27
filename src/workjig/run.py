@@ -27,6 +27,7 @@ from .models import (
     RetryPolicy,
     _positive_number,
 )
+from .platform import sync_directory
 
 
 class RecordError(RuntimeError):
@@ -477,12 +478,7 @@ class Run:
                 file.flush()
                 os.fsync(file.fileno())
             os.replace(name, self.record_dir / "run.json")
-            if os.name != "nt":
-                directory_fd = os.open(self.record_dir, os.O_RDONLY)
-                try:
-                    os.fsync(directory_fd)
-                finally:
-                    os.close(directory_fd)
+            sync_directory(self.record_dir)
         finally:
             if os.path.exists(name):
                 os.unlink(name)

@@ -207,7 +207,16 @@ def launch(
         finally:
             group_lingered = _cleanup_group(process)
             if process.poll() is None:
-                process.wait(timeout=1)
+                # A platform cleanup command can return before the process
+                # handle has become signalled.  Do not let that race escape
+                # as an unrelated TimeoutExpired exception: a launch must
+                # settle to a durable terminal outcome or remain unresolved.
+                try:
+                    process.wait(timeout=1)
+                except subprocess.TimeoutExpired:
+                    group_lingered = True
+                    process.kill()
+                    process.wait()
     finally:
         files.close()
 

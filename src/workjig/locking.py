@@ -2,38 +2,22 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import BinaryIO
+
+from .platform import file_lock
 
 
 class RunBusyError(RuntimeError):
     """Another controller already owns that record directory."""
 
 
-if os.name == "nt":
-    import msvcrt
-else:
-    import fcntl
-
-
 def acquire(file: BinaryIO) -> None:
-    if os.name == "nt":
-        file.seek(0)
-        try:
-            msvcrt.locking(file.fileno(), msvcrt.LK_NBLCK, 1)
-        except OSError as error:
-            raise BlockingIOError(error.errno, error.strerror) from error
-    else:
-        fcntl.flock(file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    file_lock().acquire(file)
 
 
 def release(file: BinaryIO) -> None:
-    if os.name == "nt":
-        file.seek(0)
-        msvcrt.locking(file.fileno(), msvcrt.LK_UNLCK, 1)
-    else:
-        fcntl.flock(file.fileno(), fcntl.LOCK_UN)
+    file_lock().release(file)
 
 
 _HOLD_MARKER = b"WJH"
