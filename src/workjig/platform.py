@@ -45,15 +45,22 @@ class _WindowsFileLock:
         self._msvcrt = msvcrt
 
     def acquire(self, file: BinaryIO) -> None:
-        file.seek(0)
+        self._rewind(file)
         try:
             self._msvcrt.locking(file.fileno(), self._msvcrt.LK_NBLCK, 1)
         except OSError as error:
             raise BlockingIOError(error.errno, error.strerror) from error
 
     def release(self, file: BinaryIO) -> None:
-        file.seek(0)
+        self._rewind(file)
         self._msvcrt.locking(file.fileno(), self._msvcrt.LK_UNLCK, 1)
+
+    @staticmethod
+    def _rewind(file: BinaryIO) -> None:
+        # msvcrt.locking works at the descriptor's position. A buffered seek
+        # may only move the buffer cursor, so position the descriptor itself.
+        file.flush()
+        os.lseek(file.fileno(), 0, os.SEEK_SET)
 
 
 def file_lock() -> FileLock:

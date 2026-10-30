@@ -158,7 +158,7 @@ def test_worker_is_owned_before_it_runs_and_inherits_only_its_handles() -> None:
     assert api.create["flags"] & windows._EXTENDED_STARTUPINFO_PRESENT
     assert api.create["inherit"] is True
     assert api.create["command"] == "worker.exe --flag"
-    assert api.create["cwd"] == "C:/work"
+    assert api.create["cwd"] == str(Path("C:/work"))
     assert api.create["std_flags"] == windows._STARTF_USESTDHANDLES
     assert api.create["std"] == api.duplicates == api.handle_list == [1003, 1004, 1005]
     assert api.create["attributes"] is not None
