@@ -195,22 +195,40 @@ proposed as recorded.
   mocked bindings on every platform and exercised for real only by the Windows
   CI job.
 
-## Unverified
+## Observed and unverified
 
-Nothing in this proposal has been executed. The following are expectations from
-Windows and CPython documentation and source reading, not observations:
+Implemented in `c637a8f` through `82c13b4` (`src/workjig/_windows.py`,
+`platform.py`, `harness.py`). The first green run of the full subprocess suite
+on `windows-latest` (Python 3.14.9) was GitHub Actions run 41092350683 on
+2026-10-30: 159 passed, 13 skipped as POSIX-only. Observed there:
 
-- `Popen` closing the thread handle before returning (CPython
-  `subprocess._execute_child` on Windows).
-- `ActiveProcesses` reflecting a child immediately after its parent exits, and
-  reaching zero promptly after `TerminateJobObject`.
+- Suspended create, assign and resume succeed for every launch in the suite.
+- A child, and a grandchild whose parent exited at once, are detected after a
+  normally exited leader and terminated; the launch reports `process_error`
+  (`test_process_group_children_are_stopped`,
+  `test_lingering_child_usage_precedence_and_replay`).
+- Handled timeouts terminate the job and settle with a non-zero return code.
+- Killing the controller terminates its worker: the orphan never logs
+  completion (`test_unresolved_reservation_blocks_resume_until_old_worker_stops`).
+- Final source size: `_windows.py` about 330 lines, within the revised estimate.
+
+Still inferred from documentation or source reading, not observed:
+
+- `Popen` closing the thread handle before returning; the implementation does
+  not depend on it since it does not use `Popen` on Windows.
 - `PROC_THREAD_ATTRIBUTE_HANDLE_LIST` preventing inheritance of other launches'
-  log handles under `run.parallel`.
-- Nested-job assignment succeeding on `windows-latest`.
-- The size estimates.
+  log handles. Parallel tests pass, but no test detects a leaked handle.
+- Nested-job assignment. The run passed, but whether the runner process was
+  itself inside a job was not checked.
 
-A deterministic probe on a Windows host, or a draft on a branch run through the
-Windows CI job, would settle the first three before the ADR is written.
+Running the suite on Windows also exposed three pre-existing portability bugs,
+fixed in the same series: the Windows file lock positioned the buffered file
+rather than the descriptor before `msvcrt.locking`; a recovery test assumed an
+orphan outlives a killed controller; and the example worker relied on
+`O_APPEND` being atomic across processes.
+
+Independent verification in a separate session, as AGENTS.md requires, has not
+yet happened. The ADR follows it.
 
 ## Reevaluate when
 
