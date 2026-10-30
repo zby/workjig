@@ -25,10 +25,35 @@ from workjig import (
 from workjig.harness import _cleanup_group
 
 SRC = Path(__file__).resolve().parents[1] / "src"
+posix_only = pytest.mark.skipif(os.name == "nt", reason="POSIX signal handling")
+
+
+def _alive(pid: int) -> bool:
+    if os.name == "nt":
+        listed = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True, check=False
+        )
+        return str(pid) in listed.stdout.split()
+    try:
+        state = Path(f"/proc/{pid}/stat").read_text().split(") ", 1)[1]
+    except FileNotFoundError:
+        return False
+    return not state.startswith("Z")
+
+
+def _kill(pid: int, *, group: bool = False) -> None:
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, check=False)
+        return
+    try:
+        (os.killpg if group else os.kill)(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
 
 
 @pytest.mark.parametrize("ignore_term", [False, True])
 @pytest.mark.subprocess
+@posix_only
 def test_cleanup_reaps_cooperative_leader_and_escalates_uncooperative_one(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ignore_term: bool
 ) -> None:
@@ -142,6 +167,7 @@ def test_first_open_missing_record_preserves_directory_and_explains_recovery(
 
 
 @pytest.mark.subprocess
+@posix_only
 def test_cooperative_timeout_commits_timeout_even_after_exit_zero(tmp_path: Path) -> None:
     script = tmp_path / "worker.py"
     stopped = tmp_path / "stopped"
@@ -306,21 +332,12 @@ if mode == 'wait':
     child_pid = int(marker.read_text())
     try:
         deadline = time.monotonic() + 5
-        while time.monotonic() < deadline:
-            try:
-                state = Path(f"/proc/{child_pid}/stat").read_text().split(") ", 1)[1]
-            except FileNotFoundError:
-                break
-            if state.startswith("Z"):
-                break
+        while _alive(child_pid):
+            if time.monotonic() > deadline:
+                pytest.fail("a child survived the leader's completion/timeout")
             time.sleep(0.01)
-        else:
-            pytest.fail("a child survived the leader's completion/timeout")
     finally:
-        try:
-            os.kill(child_pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+        _kill(child_pid)
 
 
 @pytest.mark.unit
@@ -367,10 +384,7 @@ def test_cleanup_error_leaves_reservation_unresolved(
             pids = [attempt["pid"] for entry in attempts for attempt in entry["attempts"]]
             for pid in pids:
                 if pid is not None:
-                    try:
-                        os.killpg(pid, signal.SIGKILL)
-                    except ProcessLookupError:
-                        pass
+                    _kill(pid, group=True)
 
     with Run(records, tmp_path) as run:
         unresolved = run.unresolved_launches()

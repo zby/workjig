@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import signal
 import subprocess
 import sys
 import time
@@ -447,7 +446,7 @@ def test_unresolved_reservation_blocks_resume_until_old_worker_stops(
     while not any(e["event"] == "start" for e in events(log)) and time.monotonic() < deadline:
         time.sleep(0.01)
     assert any(e["event"] == "start" for e in events(log)), "worker did not start"
-    os.kill(controller_process.pid, signal.SIGKILL)
+    controller_process.kill()
     controller_process.wait(timeout=5)
     deadline = time.monotonic() + 5
     while not any(e["event"] == "done" for e in events(log)) and time.monotonic() < deadline:

@@ -198,4 +198,4 @@ def test_emitted_terminal_records_reopen_without_another_launch(tmp_path: Path, 
         assert (tmp_path / "starts").read_text() == "start\n"
         assert replayed.launches[0].evidence["model"] == "synthetic"
     if status == "timeout":
-        assert replayed.launches[0].returncode < 0
+        assert replayed.launches[0].returncode != 0

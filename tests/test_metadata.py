@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 pytestmark = pytest.mark.subprocess
+fifo_only = pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFOs are POSIX-only")
 
 
 @pytest.mark.parametrize(
@@ -25,11 +26,11 @@ pytestmark = pytest.mark.subprocess
         ("absent", '{"x":1e400}', "exit", "delivered"),
         ("absent", '{"x":1e400}', "timeout", "timeout"),
         ("absent", '{"x":1e400}', "log_limit", "process_error"),
-        ("fifo", "{}", "exit", "protocol_error"),
-        ("absent", "fifo", "exit", "delivered"),
-        ("fifo", "fifo", "timeout", "timeout"),
-        ("fifo", "fifo", "log_limit", "protocol_error"),
-        ("absent", "{}", "log_fifo", "process_error"),
+        pytest.param("fifo", "{}", "exit", "protocol_error", marks=fifo_only),
+        pytest.param("absent", "fifo", "exit", "delivered", marks=fifo_only),
+        pytest.param("fifo", "fifo", "timeout", "timeout", marks=fifo_only),
+        pytest.param("fifo", "fifo", "log_limit", "protocol_error", marks=fifo_only),
+        pytest.param("absent", "{}", "log_fifo", "process_error", marks=fifo_only),
     ],
 )
 @pytest.mark.parametrize("max_launches", [1, 2])
