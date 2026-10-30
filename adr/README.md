@@ -16,6 +16,7 @@ turning every paragraph of that overview into a record.
 | [001](001-name-physical-launch-records.md) | Use launch vocabulary at the public API boundary | Accepted |
 | [002](002-classify-terminal-harness-failures.md) | Classify terminal harness failures, not whole logs | Accepted |
 | [003](003-separate-execution-controls-from-work-identity.md) | Separate execution controls from work identity | Accepted |
+| [004](004-own-windows-workers-with-job-objects.md) | Own Windows workers with job objects | Accepted |
 
 ## When to write one
 

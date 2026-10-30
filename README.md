@@ -29,7 +29,13 @@ support [Commonplace](https://github.com/zby/commonplace) as the foundation of
 its workflow engine. A separate package gives agents a focused codebase and a
 clear execution contract. Commonplace drives priorities, but its domain rules
 stay outside the runtime. Workjig requires neither Commonplace nor Git.
-Initial platform: Linux, Python 3.11 or newer.
+Platforms: Linux is the primary platform, Python 3.11 or newer. Windows
+support is limited: workers are owned through job objects
+([ADR 004](adr/004-own-windows-workers-with-job-objects.md)), the
+deterministic test suite runs on Windows in CI, and no real harness has yet
+been probed there. Windows kills a timed-out worker without a cooperative
+phase, and controller death kills the worker's job. See the
+[execution contract](docs/design.md) for the platform clauses.
 
 ### Compatibility
 

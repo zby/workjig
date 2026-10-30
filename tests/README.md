@@ -20,7 +20,9 @@ Select by boundary with `-m`, and by subject with a filename or `-k`.
 
 | Module | Subject | Boundary |
 |---|---|---|
-| `test_adapters.py` | CLI construction, synthetic evidence parsing, smoke-script wiring with a fake executable | Mixed |
+| `test_adapters.py` | CLI construction and synthetic evidence parsing | Unit |
+| `test_platform.py` | Command resolution and POSIX session start, with the platform module patched | Unit |
+| `test_windows_process.py` | Windows job-object ownership policy against a fake `kernel32`, runnable on any host | Unit |
 | `test_outcomes.py` | Captured/synthetic stream classification; representative runtime outcome, retry and replay cases | Mixed |
 | `test_core.py` | Request validation, locks, durable accounting, process ownership and cleanup | Mixed |
 | `test_acceptance.py` | Public API and ordinary-file workflow, parallel settlement, corrections and recovery | Mixed |

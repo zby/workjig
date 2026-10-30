@@ -1,10 +1,11 @@
 # Proposal: Windows process cleanup with job objects
 
-Status: direction agreed, implementation in progress. Written 2026-10-30
+Status: historical proposal; implemented by
+[ADR 004](../004-own-windows-workers-with-job-objects.md). Written 2026-10-30
 against revision `675d891`; revised the same day after the review comment at
-the end, which settled the open decisions as recorded below. An ADR follows
-verified implementation. The [execution contract](../../docs/design.md)
-remains authoritative until then.
+the end, which settled the open decisions as recorded below, and again after
+the two reviews of the implementation. Current behaviour is documented in the
+[execution contract](../../docs/design.md).
 
 ## Problem
 
@@ -252,8 +253,8 @@ Regression tests cover each against the fake API. The verifier's remaining
 coverage gaps stand: no test demonstrates concurrent-job isolation or detects
 a leaked handle, and several fake-only failure entry points are unexercised.
 
-The ADR has not been written. It should record that `close()` after an
-unconfirmed settlement is intentional.
+ADR 004 records the decision, including that `close()` after an unconfirmed
+settlement is intentional.
 
 ## Reevaluate when
 
