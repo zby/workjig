@@ -448,10 +448,17 @@ def test_unresolved_reservation_blocks_resume_until_old_worker_stops(
     assert any(e["event"] == "start" for e in events(log)), "worker did not start"
     controller_process.kill()
     controller_process.wait(timeout=5)
-    deadline = time.monotonic() + 5
-    while not any(e["event"] == "done" for e in events(log)) and time.monotonic() < deadline:
-        time.sleep(0.01)
-    assert any(e["event"] == "done" for e in events(log)), "old worker did not finish"
+    if os.name == "nt":
+        # Closing the dead controller's job handle kills the worker, so it
+        # never finishes. The record cannot know that, so recovery below is
+        # still explicit.
+        time.sleep(1.5)
+        assert not any(e["event"] == "done" for e in events(log)), "old worker outlived controller"
+    else:
+        deadline = time.monotonic() + 5
+        while not any(e["event"] == "done" for e in events(log)) and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert any(e["event"] == "done" for e in events(log)), "old worker did not finish"
 
     with Run(records, tmp_path) as run:
         unresolved = run.unresolved_launches()
