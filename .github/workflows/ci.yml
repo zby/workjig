@@ -41,6 +41,8 @@ jobs:
       - run: uv sync --locked
       - name: Unit and file-based tests
         run: uv run pytest -m unit
+      - name: Deterministic subprocess integration tests
+        run: uv run pytest -m subprocess
       - name: Ruff checks
         run: |
           uv run ruff check src tests
