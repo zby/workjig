@@ -4,7 +4,7 @@ Workjig is in early development: releases may change the public API and the
 persisted run-record format without migration. Each entry states what changed
 so callers can update and decide whether existing run directories remain usable.
 
-## Unreleased
+## 0.3.0 - 2026-10-30
 
 Limited Windows support. Workers on Windows are created suspended inside a
 dedicated job object and resumed once owned, so descendants that outlive their
@@ -15,7 +15,9 @@ CI; no real harness has been probed there. The public API and run-record format
 are unchanged. Internally the platform seam is now `start_process` returning
 an `OwnedProcess`; `process_creation_options` and the Windows branch of
 `cleanup_process_group` are gone. Also fixed: the Windows run lock positioned
-the buffered file rather than the descriptor before `msvcrt.locking`.
+the buffered file rather than the descriptor before `msvcrt.locking`. The
+Windows CI job now runs the deterministic subprocess suite as well as the unit
+tests.
 
 ## 0.2.1 - 2026-10-27
 
