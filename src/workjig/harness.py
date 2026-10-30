@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 from collections.abc import Callable, Mapping
 from contextlib import ExitStack
 from dataclasses import replace
@@ -13,7 +12,7 @@ from pathlib import Path
 
 from .models import LaunchRecord, LaunchStatus, Request
 from .outcomes import terminal_failure
-from .platform import cleanup_process_group, process_creation_options, resolve_command
+from .platform import OwnedProcess, resolve_command, start_process
 
 
 def _now() -> str:
@@ -59,10 +58,10 @@ def prepare(
     return paths, request.worker.command(paths)
 
 
-def _cleanup_group(process: subprocess.Popen[bytes]) -> bool:
-    """Compatibility seam for callers that test the cleanup policy."""
+def _cleanup_group(process: OwnedProcess) -> bool:
+    """Seam for tests that inject cleanup failures."""
 
-    return cleanup_process_group(process)
+    return process.cleanup()
 
 
 def _read_problem(path: Path) -> tuple[dict[str, str] | None, bool]:
@@ -136,37 +135,20 @@ def launch(
         return launch_error(error)
     try:
         try:
-            process = subprocess.Popen(
-                resolve_command(argv),
-                cwd=workdir,
-                env=env,
-                stdin=subprocess.DEVNULL,
-                stdout=stdout,
-                stderr=stderr,
-                **process_creation_options(),
-            )
+            process = start_process(resolve_command(argv), workdir, env, stdout, stderr)
         except OSError as error:
             return launch_error(error)
-        timed_out = False
-        group_lingered = False
         try:
-            on_started(process.pid, argv, started_at)
-            process.wait(timeout=request.timeout_seconds)
-        except subprocess.TimeoutExpired:
-            timed_out = True
+            timed_out = False
+            try:
+                on_started(process.pid, argv, started_at)
+                timed_out = not process.wait(request.timeout_seconds)
+            finally:
+                # Cleanup settles the whole owned group or raises, in which
+                # case the reservation stays unresolved.
+                group_lingered = _cleanup_group(process)
         finally:
-            group_lingered = _cleanup_group(process)
-            if process.poll() is None:
-                # A platform cleanup command can return before the process
-                # handle has become signalled.  Do not let that race escape
-                # as an unrelated TimeoutExpired exception: a launch must
-                # settle to a durable terminal outcome or remain unresolved.
-                try:
-                    process.wait(timeout=1)
-                except subprocess.TimeoutExpired:
-                    group_lingered = True
-                    process.kill()
-                    process.wait()
+            process.close()
     finally:
         files.close()
 

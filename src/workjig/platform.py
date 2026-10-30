@@ -1,8 +1,8 @@
 """Operating-system policies used by the runtime.
 
-The rest of Workjig deals in runtime concepts such as a held run lock and a
-durable record. This module is the small adapter where those concepts are
-translated into platform APIs.
+The rest of Workjig deals in runtime concepts such as a held run lock and an
+owned worker process. This module is the small adapter where those concepts
+are translated into platform APIs.
 """
 
 from __future__ import annotations
@@ -12,13 +12,9 @@ import shutil
 import signal
 import subprocess
 import time
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, BinaryIO, Protocol
-
-# Python exposes this constant on Windows, but keeping the documented value
-# available on other hosts lets us exercise the Windows policy without
-# importing or executing Windows-only APIs.
-_CREATE_NEW_PROCESS_GROUP = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+from typing import BinaryIO, Protocol
 
 
 class FileLock(Protocol):
@@ -85,30 +81,100 @@ def resolve_command(argv: tuple[str, ...]) -> tuple[str, ...]:
     return (executable, *argv[1:]) if executable is not None else argv
 
 
-def process_creation_options() -> dict[str, Any]:
-    """Return subprocess options that give each worker its own process group."""
+class OwnedProcess(Protocol):
+    """A worker whose whole process tree the runtime can stop and account for."""
+
+    pid: int
+    returncode: int | None
+
+    def wait(self, timeout: float | None) -> bool:
+        """Wait for the leader to exit; return False if the timeout elapsed first."""
+
+    def cleanup(self) -> bool:
+        """Stop everything owned and report whether anything lingered.
+
+        Returns with the leader reaped and `returncode` set, or raises when
+        termination cannot be confirmed so the launch stays unresolved.
+        """
+
+    def close(self) -> None:
+        """Release platform handles after settlement."""
+
+
+def start_process(
+    argv: tuple[str, ...],
+    cwd: Path,
+    env: Mapping[str, str],
+    stdout: BinaryIO,
+    stderr: BinaryIO,
+) -> OwnedProcess:
+    """Start a worker that is owned from its first instruction.
+
+    POSIX gives the worker its own session before `exec`; Windows creates it
+    suspended inside a dedicated job object and resumes it once assigned.
+    """
 
     if os.name == "nt":
-        return {"creationflags": _CREATE_NEW_PROCESS_GROUP}
-    return {"start_new_session": True}
+        from . import _windows
+
+        with open(os.devnull, "rb") as stdin:
+            return _windows.WindowsProcess.start(
+                _windows.api(), argv, cwd, env, stdin, stdout, stderr
+            )
+    return _PosixProcess(argv, cwd, env, stdout, stderr)
+
+
+class _PosixProcess:
+    def __init__(
+        self,
+        argv: tuple[str, ...],
+        cwd: Path,
+        env: Mapping[str, str],
+        stdout: BinaryIO,
+        stderr: BinaryIO,
+    ) -> None:
+        self._popen = subprocess.Popen(
+            argv,
+            cwd=cwd,
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=stdout,
+            stderr=stderr,
+            start_new_session=True,
+        )
+        self.pid = self._popen.pid
+
+    @property
+    def returncode(self) -> int | None:
+        return self._popen.returncode
+
+    def wait(self, timeout: float | None) -> bool:
+        try:
+            self._popen.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return False
+        return True
+
+    def cleanup(self) -> bool:
+        lingered = cleanup_process_group(self._popen)
+        if self._popen.poll() is None:
+            # Group termination can return before the leader's exit status is
+            # collectable. Settle it here rather than letting a TimeoutExpired
+            # escape: a launch must reach a terminal outcome or stay unresolved.
+            try:
+                self._popen.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                lingered = True
+                self._popen.kill()
+                self._popen.wait()
+        return lingered
+
+    def close(self) -> None:
+        return None
 
 
 def cleanup_process_group(process: subprocess.Popen[bytes]) -> bool:
-    """Terminate the worker group and report whether descendants lingered."""
-
-    if os.name == "nt":
-        # Never send a recycled PID to taskkill after the leader has already
-        # exited. A job-object implementation can later replace this fallback
-        # to cover descendants that outlive their leader.
-        if process.poll() is not None:
-            return False
-        completed = subprocess.run(
-            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-        )
-        return completed.returncode == 0
+    """Terminate a POSIX session and report whether any member still lived."""
 
     pgid = process.pid
     process.poll()

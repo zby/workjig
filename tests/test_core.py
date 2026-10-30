@@ -22,7 +22,7 @@ from workjig import (
     RunBusyError,
     UncertainLaunchError,
 )
-from workjig.harness import _cleanup_group
+from workjig.platform import cleanup_process_group
 
 SRC = Path(__file__).resolve().parents[1] / "src"
 posix_only = pytest.mark.skipif(os.name == "nt", reason="POSIX signal handling")
@@ -76,11 +76,11 @@ def test_cleanup_reaps_cooperative_leader_and_escalates_uncooperative_one(
             signals.append(sig)
         killpg(pgid, sig)
 
-    monkeypatch.setattr("workjig.harness.os.killpg", observed_killpg)
+    monkeypatch.setattr("workjig.platform.os.killpg", observed_killpg)
     try:
         assert select.select([process.stdout], [], [], 5)[0], "worker did not become ready"
         assert process.stdout.readline() == b"ready\n"
-        assert _cleanup_group(process)
+        assert cleanup_process_group(process)
         process.wait(timeout=5)
         assert process.returncode == (-signal.SIGKILL if ignore_term else 0)
         assert signals == ([signal.SIGTERM, signal.SIGKILL] if ignore_term else [signal.SIGTERM])
@@ -295,9 +295,12 @@ def test_timeout_is_not_classified_as_usage_limit(tmp_path: Path, message: str) 
     assert (Path(result.launches[0].launch_dir) / "stdout.log").read_text() == message + "\n"
 
 
+@pytest.mark.parametrize("grandchild", [False, True])
 @pytest.mark.parametrize("leader_exits", [False, True])
 @pytest.mark.subprocess
-def test_process_group_children_are_stopped(tmp_path: Path, leader_exits: bool) -> None:
+def test_process_group_children_are_stopped(
+    tmp_path: Path, leader_exits: bool, grandchild: bool
+) -> None:
     script = tmp_path / "worker.py"
     script.write_text(
         """\
@@ -307,12 +310,17 @@ import sys
 import time
 from pathlib import Path
 
-_, inputs, outputs, problem, marker, mode = sys.argv[1:7]
-subprocess.Popen([sys.executable, '-c',
-    'import os,signal,sys,time; from pathlib import Path; '
+_, inputs, outputs, problem, marker, mode, depth = sys.argv[1:8]
+sleeper = ('import os,signal,sys,time; from pathlib import Path; '
     'signal.signal(signal.SIGTERM, signal.SIG_IGN); '
-    'Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(30)',
-    marker])
+    'Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(30)')
+if depth == 'grandchild':
+    # The intermediate exits at once, so only ownership can reach the sleeper.
+    subprocess.Popen([sys.executable, '-c',
+        'import subprocess, sys; subprocess.Popen([sys.executable, "-c", *sys.argv[1:]])',
+        sleeper, marker])
+else:
+    subprocess.Popen([sys.executable, '-c', sleeper, marker])
 deadline = time.monotonic() + 5
 while not Path(marker).exists():
     if time.monotonic() > deadline: raise RuntimeError('child did not start')
@@ -324,7 +332,12 @@ if mode == 'wait':
         encoding="utf-8",
     )
     marker = tmp_path / "child.pid"
-    worker = _worker(script, str(marker), "exit" if leader_exits else "wait")
+    worker = _worker(
+        script,
+        str(marker),
+        "exit" if leader_exits else "wait",
+        "grandchild" if grandchild else "child",
+    )
     with Run(tmp_path / "records", tmp_path) as run:
         result = run.call(_request(worker, timeout=2))
     assert result.status == ("process_error" if leader_exits else "timeout")
