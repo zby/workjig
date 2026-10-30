@@ -40,6 +40,10 @@ second runtime or a substitute for maintained tests.
   Includes [local-provider probes](terminal-failures/local-probes.md), raw CLI
   captures, and a bounded reproduction script.
 
+- [Windows process cleanup](windows-process-cleanup-proposal.md): open proposal
+  to own Windows launches with job objects so descendants that outlive their
+  leader are detected and terminated; lists the contract decisions it needs.
+
 ## Existing evidence
 
 These materials remain at their current locations; link rather than duplicate:
