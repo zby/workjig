@@ -41,9 +41,15 @@ class RunLock:
         if self._file is not None:
             raise RuntimeError("lock already held")
         self.record_dir.mkdir(parents=True, exist_ok=True)
-        self.preexisted = self.path.exists()
-        # Read-write without truncation, creating the file on first use.
-        file = os.fdopen(os.open(self.path, os.O_RDWR | os.O_CREAT, 0o644), "r+b")
+        # Exclusive creation establishes provenance atomically: an exists/open
+        # pair could mistake another controller's interrupted first open for ours.
+        try:
+            fd = os.open(self.path, os.O_RDWR | os.O_CREAT | os.O_EXCL, 0o644)
+            self.preexisted = False
+        except FileExistsError:
+            fd = os.open(self.path, os.O_RDWR)
+            self.preexisted = True
+        file = os.fdopen(fd, "r+b")
         try:
             file_lock().acquire(file)
         except BlockingIOError as error:
@@ -86,7 +92,9 @@ class HeldLock:
     def __enter__(self) -> Path:
         self._lock.acquire()
         try:
-            self._lock.mark_held()
+            # Existing bytes are recovery evidence, not ours to reclassify.
+            if not self._lock.preexisted:
+                self._lock.mark_held()
         except BaseException:
             self._lock.release()
             raise
