@@ -60,11 +60,23 @@ def main() -> None:
         )
         + "\n"
     )
-    fd = os.open(log_file, os.O_CREAT | os.O_APPEND | os.O_WRONLY, 0o600)
+    # O_APPEND is not atomic across processes on Windows, so serialize the
+    # parallel producers' appends with a directory lock.
+    lock_dir = log_file.with_name(log_file.name + ".lock")
+    while True:
+        try:
+            lock_dir.mkdir()
+            break
+        except FileExistsError:
+            time.sleep(0.005)
     try:
-        os.write(fd, line.encode("utf-8"))
+        fd = os.open(log_file, os.O_CREAT | os.O_APPEND | os.O_WRONLY, 0o600)
+        try:
+            os.write(fd, line.encode("utf-8"))
+        finally:
+            os.close(fd)
     finally:
-        os.close(fd)
+        lock_dir.rmdir()
 
 
 if __name__ == "__main__":
