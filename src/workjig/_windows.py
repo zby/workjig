@@ -16,9 +16,14 @@ from ctypes import wintypes
 from pathlib import Path
 from typing import Any, BinaryIO
 
+from .platform import OwnershipError
+
 _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
 _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
 _JOB_OBJECT_BASIC_ACCOUNTING_INFORMATION = 1
+_JOB_OBJECT_BASIC_PROCESS_ID_LIST = 3
+_PID_LIST_CAPACITY = 256
+_ERROR_MORE_DATA = 234
 _PROC_THREAD_ATTRIBUTE_HANDLE_LIST = 0x20002
 _STARTF_USESTDHANDLES = 0x100
 _CREATE_SUSPENDED = 0x4
@@ -33,10 +38,10 @@ _CREATION_FLAGS = (
 )
 _DUPLICATE_SAME_ACCESS = 0x2
 _WAIT_OBJECT_0 = 0
+_WAIT_TIMEOUT = 0x102
 _INFINITE = 0xFFFFFFFF
 _RESUME_FAILED = 0xFFFFFFFF
 _TERMINATED_EXIT_CODE = 1
-_LINGER_GRACE_SECONDS = 0.25
 _TERMINATION_DEADLINE_SECONDS = 1.0
 
 
@@ -89,6 +94,14 @@ class BasicAccountingInformation(ctypes.Structure):
         ("TotalProcesses", wintypes.DWORD),
         ("ActiveProcesses", wintypes.DWORD),
         ("TotalTerminatedProcesses", wintypes.DWORD),
+    ]
+
+
+class BasicProcessIdList(ctypes.Structure):
+    _fields_ = [
+        ("NumberOfAssignedProcesses", wintypes.DWORD),
+        ("NumberOfProcessIdsInList", wintypes.DWORD),
+        ("ProcessIdList", ctypes.c_size_t * _PID_LIST_CAPACITY),
     ]
 
 
@@ -214,6 +227,9 @@ class Kernel32:
     def os_handle(self, fd: int) -> int:
         return self._msvcrt.get_osfhandle(fd)
 
+    def last_error(self) -> int:
+        return ctypes.get_last_error()
+
     def error(self, what: str) -> OSError:
         code = ctypes.get_last_error()
         failure = ctypes.WinError(code)
@@ -264,6 +280,10 @@ def environment_block(env: Mapping[str, str]) -> str:
     return "".join(f"{key}={value}\0" for key, value in entries) + "\0"
 
 
+def _deadline_milliseconds() -> int:
+    return int(_TERMINATION_DEADLINE_SECONDS * 1000)
+
+
 class WindowsProcess:
     """A worker that is a member of its own job object from its first instruction."""
 
@@ -303,17 +323,41 @@ class WindowsProcess:
             api.CloseHandle(job)
             raise
         if not api.AssignProcessToJobObject(job, information.hProcess):
-            error = api.error("AssignProcessToJobObject")
-            api.TerminateProcess(information.hProcess, _TERMINATED_EXIT_CODE)
-            cls._close_all(api, information.hThread, information.hProcess, job)
-            raise error
+            cls._abandon(api, job, information, api.error("AssignProcessToJobObject"), in_job=False)
         if api.ResumeThread(information.hThread) == _RESUME_FAILED:
-            error = api.error("ResumeThread")
-            api.TerminateJobObject(job, _TERMINATED_EXIT_CODE)
-            cls._close_all(api, information.hThread, information.hProcess, job)
-            raise error
+            cls._abandon(api, job, information, api.error("ResumeThread"), in_job=True)
         api.CloseHandle(information.hThread)
         return cls(api, job, information.hProcess, information.dwProcessId)
+
+    @classmethod
+    def _abandon(
+        cls,
+        api: Any,
+        job: int,
+        information: ProcessInformation,
+        error: OSError,
+        *,
+        in_job: bool,
+    ) -> None:
+        """Stop a suspended worker after a setup failure, then raise.
+
+        Raises `error` once the worker's exit is confirmed. Raises
+        OwnershipError instead when it cannot be confirmed, because a settled
+        launch_error must not stand for a process that may still exist.
+        """
+
+        stopped = in_job and api.TerminateJobObject(job, _TERMINATED_EXIT_CODE)
+        stopped = stopped or api.TerminateProcess(information.hProcess, _TERMINATED_EXIT_CODE)
+        exited = stopped and (
+            api.WaitForSingleObject(information.hProcess, _deadline_milliseconds())
+            == _WAIT_OBJECT_0
+        )
+        cls._close_all(api, information.hThread, information.hProcess, job)
+        if not exited:
+            raise OwnershipError(
+                f"could not confirm that pid {information.dwProcessId} stopped after {error}"
+            ) from error
+        raise error
 
     @classmethod
     def _create_suspended(
@@ -325,8 +369,10 @@ class WindowsProcess:
         standard: tuple[BinaryIO, BinaryIO, BinaryIO],
     ) -> ProcessInformation:
         # Inheritable duplicates exist only for the duration of CreateProcessW,
-        # and the handle list restricts inheritance to exactly these three, so
-        # a concurrent launch on another thread cannot capture them.
+        # and the handle list limits what this worker inherits to these three.
+        # Workjig's own concurrent launches all use a handle list, so they
+        # cannot capture each other's duplicates; host code creating processes
+        # with unrestricted inheritance during that window still could.
         current = api.GetCurrentProcess()
         inherited: list[int] = []
         attributes = None
@@ -396,19 +442,46 @@ class WindowsProcess:
             api.CloseHandle(handle)
 
     def poll(self) -> int | None:
-        if self.returncode is None and self._api.WaitForSingleObject(self._process, 0) == (
-            _WAIT_OBJECT_0
-        ):
-            code = wintypes.DWORD()
-            if not self._api.GetExitCodeProcess(self._process, ctypes.byref(code)):
-                raise self._api.error("GetExitCodeProcess")
-            self.returncode = code.value
-        return self.returncode
+        return self._wait_milliseconds(0)
 
     def wait(self, timeout: float | None) -> bool:
         milliseconds = _INFINITE if timeout is None else min(int(timeout * 1000), _INFINITE - 1)
-        self._api.WaitForSingleObject(self._process, max(milliseconds, 0))
-        return self.poll() is not None
+        return self._wait_milliseconds(max(milliseconds, 0)) is not None
+
+    def _wait_milliseconds(self, milliseconds: int) -> int | None:
+        if self.returncode is not None:
+            return self.returncode
+        result = self._api.WaitForSingleObject(self._process, milliseconds)
+        if result == _WAIT_TIMEOUT:
+            return None
+        if result != _WAIT_OBJECT_0:
+            raise self._api.error("WaitForSingleObject")
+        code = wintypes.DWORD()
+        if not self._api.GetExitCodeProcess(self._process, ctypes.byref(code)):
+            raise self._api.error("GetExitCodeProcess")
+        self.returncode = code.value
+        return self.returncode
+
+    def descendants_present(self) -> bool:
+        """Report whether the job holds any member other than the leader.
+
+        Membership is keyed by pid, so a leader whose exit has not yet reached
+        the job's accounting is not mistaken for a surviving descendant.
+        """
+
+        members = BasicProcessIdList()
+        if not self._api.QueryInformationJobObject(
+            self._job,
+            _JOB_OBJECT_BASIC_PROCESS_ID_LIST,
+            ctypes.byref(members),
+            ctypes.sizeof(members),
+            None,
+        ):
+            if self._api.last_error() == _ERROR_MORE_DATA:
+                return True  # More members than the buffer holds: not just the leader.
+            raise self._api.error("QueryInformationJobObject")
+        listed = members.ProcessIdList[: members.NumberOfProcessIdsInList]
+        return any(pid != self.pid for pid in listed)
 
     def active_processes(self) -> int:
         accounting = BasicAccountingInformation()
@@ -422,8 +495,8 @@ class WindowsProcess:
             raise self._api.error("QueryInformationJobObject")
         return accounting.ActiveProcesses
 
-    def _drained(self, seconds: float) -> bool:
-        deadline = time.monotonic() + seconds
+    def _drained(self) -> bool:
+        deadline = time.monotonic() + _TERMINATION_DEADLINE_SECONDS
         while True:
             if self.active_processes() == 0:
                 return True
@@ -434,21 +507,17 @@ class WindowsProcess:
     def cleanup(self) -> bool:
         """Stop every member of the job and report whether anything lingered.
 
-        Raises when termination cannot be confirmed within the deadline, so
-        the caller leaves the reservation unresolved instead of recording an
-        outcome for processes that may still run.
+        Raises OwnershipError when termination cannot be confirmed within the
+        deadline, so the caller leaves the reservation unresolved instead of
+        recording an outcome for processes that may still run.
         """
 
-        # The leader's handle and the job's accounting are not updated
-        # atomically, so an exited leader is given a moment to leave the count.
-        if self.poll() is not None and self._drained(_LINGER_GRACE_SECONDS):
+        if self.poll() is not None and not self.descendants_present():
             return False
         if not self._api.TerminateJobObject(self._job, _TERMINATED_EXIT_CODE):
             raise self._api.error("TerminateJobObject")
-        if not self._drained(_TERMINATION_DEADLINE_SECONDS) or not self.wait(
-            _TERMINATION_DEADLINE_SECONDS
-        ):
-            raise OSError(f"worker job for pid {self.pid} did not stop after termination")
+        if not self._drained() or not self.wait(_TERMINATION_DEADLINE_SECONDS):
+            raise OwnershipError(f"worker job for pid {self.pid} did not stop after termination")
         return True
 
     def close(self) -> None:

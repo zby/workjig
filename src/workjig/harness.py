@@ -137,6 +137,8 @@ def launch(
         try:
             process = start_process(resolve_command(argv), workdir, env, stdout, stderr)
         except OSError as error:
+            # Only a failure that left nothing running settles as launch_error.
+            # An OwnershipError propagates and leaves the reservation unresolved.
             return launch_error(error)
         try:
             timed_out = False

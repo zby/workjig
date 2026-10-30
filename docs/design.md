@@ -96,13 +96,18 @@ stopped; that case follows the explicit recovery rule above.
 
 On Windows the owned group is a job object. Each worker is created suspended,
 assigned to its own job and resumed only once owned, so it cannot spawn before
-ownership is established. There is no cooperative phase: handled timeouts and
-lingering descendants terminate the job immediately, and settlement waits a
-bounded time for the job to report no active processes. If it cannot, the
-launch stays unresolved. Closing the controller's last job handle, including
-on a crash, kills the job, but the runtime cannot observe that, so the explicit
-recovery rule still applies. Assigning a worker whose controller already runs
-inside a job requires Windows 8 or Windows Server 2012 or later.
+ownership is established. If that setup fails, the suspended worker is
+terminated and its exit confirmed before `launch_error` is recorded; when the
+exit cannot be confirmed the launch stays unresolved. There is no cooperative
+phase: handled timeouts and lingering descendants terminate the job
+immediately. A descendant lingers when the job lists any member other than the
+leader at the moment the leader is reaped. Settlement waits a bounded time for
+the job to report no active processes; if it cannot, the launch stays
+unresolved. Closing the controller's last job handle, including on a crash and
+after an unconfirmed settlement, kills the job, but the runtime cannot observe
+that, so the explicit recovery rule still applies. Assigning a worker whose
+controller already runs inside a job requires Windows 8 or Windows Server 2012
+or later.
 
 An exception or keyboard interruption after reservation leaves the launch
 unresolved even if cleanup ran. Explicit acknowledgment is still required;

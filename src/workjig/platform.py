@@ -88,6 +88,14 @@ def resolve_command(argv: tuple[str, ...]) -> tuple[str, ...]:
     return (executable, *argv[1:]) if executable is not None else argv
 
 
+class OwnershipError(RuntimeError):
+    """The runtime could not confirm that a process it started has stopped.
+
+    Unlike an OSError at launch this must not settle the launch: the harness
+    lets it propagate so the reservation stays unresolved for explicit recovery.
+    """
+
+
 class OwnedProcess(Protocol):
     """A worker whose whole process tree the runtime can stop and account for."""
 
@@ -100,8 +108,9 @@ class OwnedProcess(Protocol):
     def cleanup(self) -> bool:
         """Stop everything owned and report whether anything lingered.
 
-        Returns with the leader reaped and `returncode` set, or raises when
-        termination cannot be confirmed so the launch stays unresolved.
+        Returns with the leader reaped and `returncode` set, or raises
+        OwnershipError when termination cannot be confirmed so the launch
+        stays unresolved.
         """
 
     def close(self) -> None:

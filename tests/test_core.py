@@ -379,7 +379,7 @@ def test_cleanup_error_leaves_reservation_unresolved(
     script.write_text("import time\ntime.sleep(5)\n", encoding="utf-8")
     call = _request(_worker(script), timeout=0.05)
 
-    def fail_cleanup(_: subprocess.Popen[bytes]) -> bool:
+    def fail_cleanup(_: object) -> bool:
         raise PermissionError("injected cleanup failure")
 
     monkeypatch.setattr("workjig.harness._cleanup_group", fail_cleanup)

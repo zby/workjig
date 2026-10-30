@@ -210,7 +210,9 @@ on `windows-latest` (Python 3.14.9) was GitHub Actions run 41092350683 on
 - Handled timeouts terminate the job and settle with a non-zero return code.
 - Killing the controller terminates its worker: the orphan never logs
   completion (`test_unresolved_reservation_blocks_resume_until_old_worker_stops`).
-- Final source size: `_windows.py` about 330 lines, within the revised estimate.
+- Source size: `_windows.py` was 455 physical lines at `82c13b4` (an earlier
+  note here said about 330, which was wrong) and 524 after the fixes below,
+  above the revised 300–400 estimate for the whole change.
 
 Still inferred from documentation or source reading, not observed:
 
@@ -227,8 +229,31 @@ rather than the descriptor before `msvcrt.locking`; a recovery test assumed an
 orphan outlives a killed controller; and the example worker relied on
 `O_APPEND` being atomic across processes.
 
-Independent verification in a separate session, as AGENTS.md requires, has not
-yet happened. The ADR follows it.
+Two independent reviews of `c637a8f`..`8754c4d` followed on 2026-10-30: the
+reviewer's second pass and a fresh verification session that saw neither the
+implementation conversation nor the reviewer's findings. Both found that the
+250 ms linger grace could report `delivered` for a descendant that outlived
+its leader briefly, and that a failed `WaitForSingleObject` was
+indistinguishable from a timeout. The reviewer alone found that a failed or
+unconfirmed termination after an assignment or resume failure was settled as
+`launch_error`. The verifier alone found an overclaiming comment about handle
+inheritance, the size inaccuracy above, and that `close()` after a failed
+cleanup lets kill-on-close finish the job. The verifier's verdict was accept
+with fixes; the POSIX path of `harness.launch` was confirmed behaviourally
+identical to before the change.
+
+Fixes made in the commit following `8754c4d`: lingering is decided from the
+job's pid list, so any member other than the leader lingers and a stale
+leader entry does not, with no grace period; setup failures terminate the
+suspended worker and confirm its exit, raising `OwnershipError` instead of an
+`OSError` when they cannot, which leaves the reservation `reserved` and
+therefore unresolved; wait results other than signalled or timeout raise.
+Regression tests cover each against the fake API. The verifier's remaining
+coverage gaps stand: no test demonstrates concurrent-job isolation or detects
+a leaked handle, and several fake-only failure entry points are unexercised.
+
+The ADR has not been written. It should record that `close()` after an
+unconfirmed settlement is intentional.
 
 ## Reevaluate when
 

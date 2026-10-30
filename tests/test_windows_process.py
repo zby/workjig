@@ -10,29 +10,38 @@ import pytest
 
 import workjig._windows as windows
 import workjig.platform as platform
+from workjig.platform import OwnershipError
 
 pytestmark = pytest.mark.unit
 
-JOB, PROCESS, THREAD, PID = 11, 21, 22, 4242
+JOB, PROCESS, THREAD, PID, CHILD = 11, 21, 22, 4242, 7777
 
 
 class FakeKernel32:
-    """Records calls and lets a test fail one entry point or shape job accounting."""
+    """Records calls and lets a test fail one entry point or shape job membership.
+
+    `members` are the pids the job reports until it is terminated; afterwards
+    it reports `active_after_terminate` processes and no pids.
+    """
 
     def __init__(
         self,
         *,
         fail: str | None = None,
-        active_before_terminate: int = 0,
+        members: tuple[int, ...] = (),
         active_after_terminate: int = 0,
         exited: bool = True,
         exit_code: int = 0,
+        wait_result: int | None = None,
+        more_data: bool = False,
     ) -> None:
         self.fail = fail
-        self.active_before = active_before_terminate
+        self.members = members
         self.active_after = active_after_terminate
         self.exited = exited
         self.exit_code = exit_code
+        self.wait_result = wait_result
+        self.more_data = more_data
         self.terminated_job = False
         self.calls: list[str] = []
         self.closed: list[int] = []
@@ -54,7 +63,16 @@ class FakeKernel32:
 
     def QueryInformationJobObject(self, job, kind, info, size, returned):
         assert job == JOB
-        info._obj.ActiveProcesses = self.active_after if self.terminated_job else self.active_before
+        members = () if self.terminated_job else self.members
+        if kind == windows._JOB_OBJECT_BASIC_PROCESS_ID_LIST:
+            if self.more_data:
+                self.calls.append("QueryInformationJobObject")
+                return False
+            info._obj.NumberOfAssignedProcesses = len(members)
+            info._obj.NumberOfProcessIdsInList = len(members)
+            info._obj.ProcessIdList[: len(members)] = members
+        else:
+            info._obj.ActiveProcesses = self.active_after if self.terminated_job else len(members)
         return self._ok("QueryInformationJobObject")
 
     def AssignProcessToJobObject(self, job, process):
@@ -63,10 +81,12 @@ class FakeKernel32:
 
     def TerminateJobObject(self, job, code):
         assert job == JOB
+        if not self._ok("TerminateJobObject"):
+            return False
         self.terminated_job = True
         self.exited = True
         self.exit_code = code
-        return self._ok("TerminateJobObject")
+        return True
 
     def CreateProcessW(self, app, command, psa, tsa, inherit, flags, env, cwd, startup, info):
         startup_info = startup._obj.StartupInfo
@@ -111,7 +131,10 @@ class FakeKernel32:
 
     def WaitForSingleObject(self, handle, milliseconds):
         assert handle == PROCESS
-        return windows._WAIT_OBJECT_0 if self.exited else 0x102
+        self.calls.append("WaitForSingleObject")
+        if self.wait_result is not None:
+            return self.wait_result
+        return windows._WAIT_OBJECT_0 if self.exited else windows._WAIT_TIMEOUT
 
     def GetExitCodeProcess(self, handle, code):
         code._obj.value = self.exit_code
@@ -119,7 +142,10 @@ class FakeKernel32:
 
     def TerminateProcess(self, handle, code):
         assert handle == PROCESS
-        return self._ok("TerminateProcess")
+        if not self._ok("TerminateProcess"):
+            return False
+        self.exited = True
+        return True
 
     def CloseHandle(self, handle):
         self.closed.append(handle)
@@ -127,6 +153,9 @@ class FakeKernel32:
 
     def os_handle(self, fd):
         return fd
+
+    def last_error(self):
+        return windows._ERROR_MORE_DATA if self.more_data else 0
 
     def error(self, what):
         return OSError(f"{what} failed")
@@ -144,7 +173,6 @@ def _start(api: FakeKernel32) -> windows.WindowsProcess:
 
 @pytest.fixture(autouse=True)
 def fast_deadlines(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(windows, "_LINGER_GRACE_SECONDS", 0.02)
     monkeypatch.setattr(windows, "_TERMINATION_DEADLINE_SECONDS", 0.02)
 
 
@@ -189,7 +217,48 @@ def test_launch_failures_stop_the_suspended_worker_and_release_handles(
     assert JOB in api.closed
     assert {1003, 1004, 1005} <= set(api.closed)
     if failure != "CreateProcessW":
+        # The suspended worker's exit was confirmed before the error settled.
+        assert "WaitForSingleObject" in api.calls
         assert {PROCESS, THREAD} <= set(api.closed)
+
+
+def test_setup_failure_whose_termination_fails_does_not_settle() -> None:
+    class TerminationFails(FakeKernel32):
+        def TerminateProcess(self, handle, code):
+            self.calls.append("TerminateProcess")
+            return False
+
+    api = TerminationFails(fail="AssignProcessToJobObject", exited=False)
+    with pytest.raises(OwnershipError, match=f"pid {PID}") as raised:
+        _start(api)
+
+    assert not isinstance(raised.value, OSError)
+    assert "AssignProcessToJobObject" in str(raised.value.__cause__)
+    assert {PROCESS, THREAD, JOB} <= set(api.closed)
+
+
+def test_setup_failure_whose_worker_does_not_exit_does_not_settle() -> None:
+    class StaysAlive(FakeKernel32):
+        def TerminateProcess(self, handle, code):
+            self.calls.append("TerminateProcess")
+            return True  # Reported success, but the process never signals.
+
+    api = StaysAlive(fail="AssignProcessToJobObject", exited=False)
+    with pytest.raises(OwnershipError):
+        _start(api)
+
+
+def test_resume_failure_falls_back_to_terminating_the_process() -> None:
+    class JobTerminationFails(FakeKernel32):
+        def TerminateJobObject(self, job, code):
+            self.calls.append("TerminateJobObject")
+            return False
+
+    api = JobTerminationFails(fail="ResumeThread", exited=False)
+    with pytest.raises(OSError, match="ResumeThread"):
+        _start(api)
+
+    assert "TerminateProcess" in api.calls
 
 
 def test_exited_leader_with_empty_job_did_not_linger() -> None:
@@ -202,8 +271,28 @@ def test_exited_leader_with_empty_job_did_not_linger() -> None:
     assert "TerminateJobObject" not in api.calls
 
 
-def test_descendant_outliving_leader_is_terminated_and_reported() -> None:
-    api = FakeKernel32(active_before_terminate=1, active_after_terminate=0)
+def test_stale_leader_entry_is_not_a_lingering_descendant() -> None:
+    api = FakeKernel32(members=(PID,))
+    process = _start(api)
+
+    assert process.wait(1.0) is True
+    assert process.cleanup() is False
+    assert "TerminateJobObject" not in api.calls
+
+
+def test_descendant_present_at_leader_exit_is_terminated_and_reported() -> None:
+    # No grace period: a child alive when the leader is reaped lingers, even if
+    # it would have exited a moment later.
+    api = FakeKernel32(members=(PID, CHILD))
+    process = _start(api)
+
+    assert process.wait(1.0) is True
+    assert process.cleanup() is True
+    assert "TerminateJobObject" in api.calls
+
+
+def test_more_members_than_the_buffer_holds_counts_as_lingering() -> None:
+    api = FakeKernel32(more_data=True)
     process = _start(api)
 
     assert process.wait(1.0) is True
@@ -212,7 +301,7 @@ def test_descendant_outliving_leader_is_terminated_and_reported() -> None:
 
 
 def test_timeout_terminates_job_and_settles_leader() -> None:
-    api = FakeKernel32(exited=False, active_before_terminate=2)
+    api = FakeKernel32(exited=False, members=(PID, CHILD))
     process = _start(api)
 
     assert process.wait(0.01) is False
@@ -221,12 +310,23 @@ def test_timeout_terminates_job_and_settles_leader() -> None:
 
 
 def test_unconfirmed_termination_raises_instead_of_settling() -> None:
-    api = FakeKernel32(active_before_terminate=1, active_after_terminate=1)
+    api = FakeKernel32(members=(PID, CHILD), active_after_terminate=1)
     process = _start(api)
     process.wait(1.0)
 
-    with pytest.raises(OSError, match="did not stop"):
+    with pytest.raises(OwnershipError, match="did not stop"):
         process.cleanup()
+
+
+def test_wait_failure_is_an_error_not_a_timeout() -> None:
+    api = FakeKernel32(exited=False)
+    process = _start(api)
+    api.wait_result = 0xFFFFFFFF
+
+    with pytest.raises(OSError, match="WaitForSingleObject"):
+        process.wait(0.01)
+    with pytest.raises(OSError, match="WaitForSingleObject"):
+        process.poll()
 
 
 def test_close_releases_process_and_job() -> None:

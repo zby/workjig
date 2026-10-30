@@ -61,7 +61,8 @@ def main() -> None:
         + "\n"
     )
     # O_APPEND is not atomic across processes on Windows, so serialize the
-    # parallel producers' appends with a directory lock.
+    # parallel producers' appends with a directory lock. A producer killed
+    # while holding it would stall later producers; this example accepts that.
     lock_dir = log_file.with_name(log_file.name + ".lock")
     while True:
         try:
