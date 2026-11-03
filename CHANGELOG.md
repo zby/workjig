@@ -4,6 +4,15 @@ Workjig is in early development: releases may change the public API and the
 persisted run-record format without migration. Each entry states what changed
 so callers can update and decide whether existing run directories remain usable.
 
+## 0.3.1 - 2026-11-03
+
+Fixed: on Windows the run lock made `.lock` unreadable through other handles
+while a `Run` or `hold()` owned it, because `msvcrt.locking` takes mandatory
+byte-range locks and the lock covered byte 0. The lock now covers one byte
+1 GiB past the start, so the hold marker and interrupted-open bytes stay
+readable as recovery evidence. Exclusion between holders is unchanged. The
+public API and run-record format are unchanged.
+
 ## 0.3.0 - 2026-10-30
 
 Limited Windows support. Workers on Windows are created suspended inside a
