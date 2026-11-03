@@ -31,6 +31,22 @@ def test_run_excludes_hold(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
+def test_lock_file_stays_readable_while_held(tmp_path: Path) -> None:
+    # Windows byte-range locks are mandatory; locking stored bytes would make
+    # recovery evidence unreadable to other handles while the lock is held.
+    records = tmp_path / "records"
+    lock = records / ".lock"
+    with hold(records):
+        assert lock.read_bytes() == b"WJH"
+    with Run(records, tmp_path):
+        assert lock.read_bytes() == b"WJH"
+        with pytest.raises(RunBusyError):
+            with hold(records):
+                pass
+    assert lock.read_bytes() == b"WJH"
+
+
+@pytest.mark.unit
 def test_run_accepts_lock_only_directory(tmp_path: Path) -> None:
     records = tmp_path / "records"
     with hold(records):
@@ -53,6 +69,7 @@ def test_hold_preserves_interrupted_first_open(tmp_path: Path, contents: bytes) 
                 pass
         with hold(records):
             assert busy(records)
+            assert lock.read_bytes() == contents
         assert lock.read_bytes() == contents
         assert not busy(records)
     with pytest.raises(RecordError, match="run record is missing"):

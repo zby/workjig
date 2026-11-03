@@ -39,28 +39,36 @@ class _PosixFileLock:
 
 
 class _WindowsFileLock:
+    # Windows byte-range locks are mandatory: other handles cannot read locked
+    # bytes. Lock one byte far past any content so the file stays readable.
+    _OFFSET = 1 << 30
+
     def __init__(self) -> None:
         import msvcrt
 
         self._msvcrt = msvcrt
 
     def acquire(self, file: BinaryIO) -> None:
-        self._rewind(file)
         try:
-            self._msvcrt.locking(file.fileno(), self._msvcrt.LK_NBLCK, 1)
+            self._locking(file, self._msvcrt.LK_NBLCK)
         except OSError as error:
             raise BlockingIOError(error.errno, error.strerror) from error
 
     def release(self, file: BinaryIO) -> None:
-        self._rewind(file)
-        self._msvcrt.locking(file.fileno(), self._msvcrt.LK_UNLCK, 1)
+        self._locking(file, self._msvcrt.LK_UNLCK)
 
-    @staticmethod
-    def _rewind(file: BinaryIO) -> None:
+    def _locking(self, file: BinaryIO, mode: int) -> None:
         # msvcrt.locking works at the descriptor's position. A buffered seek
-        # may only move the buffer cursor, so position the descriptor itself.
+        # may only move the buffer cursor, so position the descriptor itself
+        # and restore it so the buffered file's cached position stays valid.
         file.flush()
-        os.lseek(file.fileno(), 0, os.SEEK_SET)
+        fd = file.fileno()
+        position = os.lseek(fd, 0, os.SEEK_CUR)
+        os.lseek(fd, self._OFFSET, os.SEEK_SET)
+        try:
+            self._msvcrt.locking(fd, mode, 1)
+        finally:
+            os.lseek(fd, position, os.SEEK_SET)
 
 
 def file_lock() -> FileLock:
