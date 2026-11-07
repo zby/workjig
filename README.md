@@ -65,21 +65,28 @@ Our [design rationale](docs/design-rationale.md) explains the local tradeoffs.
 ## A call
 
 Install from PyPI with `pip install workjig` or `uv add workjig`.
+Install and authenticate [Claude Code](https://code.claude.com/docs/en/overview)
+separately; the `claude` command must be available on your `PATH`. Running this
+example makes a real model call and consumes your account's usage allowance.
 
 ```python
-import sys
 from pathlib import Path
 
-from workjig import CommandWorker, Request, Run
+from workjig import Request, Run
+from workjig.adapters import claude_worker
 
-worker = CommandWorker(argv=(sys.executable, str(Path("worker.py").resolve()), "{prompt}"))
+worker = claude_worker(
+    "haiku",
+    allowed_tools=("Read", "Write"),
+    permission_mode="acceptEdits",
+)
 request = Request(
     call_id="summarize-v1",
     task="Read the supplied source and write the requested summary file.",
     inputs={"source.txt": "Material to summarize."},
     required_outputs=("summary.txt",),
     worker=worker,
-    timeout_seconds=60,
+    timeout_seconds=180,
 )
 
 with Run(Path("run-records"), Path.cwd()) as run:
@@ -90,13 +97,40 @@ with Run(Path("run-records"), Path.cwd()) as run:
         print(result.status)
 ```
 
-Supply your own `worker.py`: it receives a generated prompt with absolute input
-and output paths, reads the inputs and writes the named files. Standard output
-is execution evidence, not the file result. For real harnesses, use the
-`claude_worker`, `codex_worker` or `pi_worker` factories instead of a generic
-`CommandWorker`; see [usage and adapter configuration](docs/usage.md).
-The [ordinary-file example](examples/README.md) provides a runnable workflow
-with checks, corrections and resume.
+`claude_worker` configures a noninteractive Claude Code command; it does not
+launch anything until `run.call(request)`. Workjig writes the task and absolute
+input/output paths into a prompt file, then asks Claude Code to read it and
+perform the task. The returned `summary.txt` is the file Claude Code writes;
+standard output is retained as execution evidence, not used as the answer.
+The tool allowlist and permission mode permit file edits; they are not a sandbox.
+Run this example in a working directory you are comfortable letting the harness
+access. Repeating it with the same records and declared work reuses the delivery
+rather than making another model call.
+
+To use Codex or Pi instead, replace the `worker` definition before constructing
+the request (install and authenticate the corresponding CLI first):
+
+```python
+from workjig.adapters import codex_worker, pi_worker
+
+# Codex CLI: choose a model available to your account.
+worker = codex_worker("gpt-6.1-sol", sandbox="workspace-write", effort="low")
+
+# Or Pi CLI: choose a provider and model available to your account.
+worker = pi_worker(
+    "gpt-6.1-sol",
+    provider="openai",
+    tools=("read", "write"),
+    project_trust="no-approve",
+)
+```
+
+These factories construct command configurations, not model clients. See
+[usage and adapter configuration](docs/usage.md) for details. For credential-free
+tests, a generic `CommandWorker` can launch a deterministic Python script;
+see the [simulated harness example](examples/README.md#script-backed-simulated-harness).
+The [ordinary-file example](examples/README.md#ordinary-file-workflow) demonstrates
+checks, corrections and resume without a model.
 
 ## Guarantees and boundaries
 

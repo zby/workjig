@@ -31,6 +31,7 @@ Select by boundary with `-m`, and by subject with a filename or `-k`.
 | `test_continuation.py` | Execution-control changes, total ceilings, usage-stop approval and recovery | Subprocess |
 | `test_continuation_validation.py` | Recorded execution controls and continuation authorization | Unit |
 | `test_review.py` | Regression probes for output attribution and observed parallel limits | Subprocess |
+| `test_examples.py` | README snippets, every example's help entry point, and single/all smoke-probe commands with executable substitutes | Mixed |
 | `test_simulated_harness.py` | Script-backed example delivery, effects, synthetic logs, replay and worker problems | Subprocess |
 | `test_smoke.py` | Manual smoke-command argument validation; launches no harness | Unit |
 
@@ -38,6 +39,15 @@ Select by boundary with `-m`, and by subject with a filename or `-k`.
 `subprocess` includes tests whose fixtures launch workers, even if the assertion
 itself checks parsing or a persisted record. A subprocess test is not a live
 harness test: the workers are local deterministic programs owned by the test.
+
+Example smoke coverage runs with the normal suite. `test_examples.py` executes
+the README Python snippets and the manual probe's single/all command paths with
+Python executable substitutes, preserving the real factories' remaining arguments
+and output protocols. It also checks `--help` for every Python script in
+`examples/`. Full workflow execution is covered by the ordinary-file cases in
+`test_acceptance.py` and the simulator cases in `test_simulated_harness.py`;
+their worker scripts execute as part of those workflows. These checks need no
+installed harness or credentials and do not establish live-harness compatibility.
 
 Test parsing, classification and validation directly rather than repeating the
 whole runtime lifecycle for every input. Keep representative subprocess cases
@@ -65,7 +75,8 @@ uv --no-config sync --locked        # reproduce CI without personal uv settings
 
 [`examples/smoke_harness.py`](../examples/smoke_harness.py) deliberately invokes
 an installed harness and model, checks a delivered file, then verifies reuse.
-It is outside pytest and is not run by GitHub CI. See the
+Real-harness execution stays outside pytest and GitHub CI; the smoke tests run
+this command only with deterministic executable substitutes. See the
 [manual probe commands](../docs/usage.md#examples-and-real-harness-probes).
 
 Captured CLI streams in `adr/evidence/` are static test inputs: replaying them
