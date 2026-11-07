@@ -45,6 +45,15 @@ The generic command adapter also accepts `{input_dir}`, `{output_dir}`,
 outputs are single filenames. Each physical launch has fresh paths, including
 when a call retries.
 
+## Testing workflows without a model
+
+A simulator can be an ordinary script launched through `CommandWorker`.
+It receives the real prepared launch files and produces outputs, filesystem
+effects and fixture logs through the same subprocess boundary as any worker.
+See the [runnable simulator example](../examples/README.md#script-backed-simulated-harness),
+including how to substitute a concrete adapter's executable without changing
+its argument construction or protocol selection.
+
 ## Resume and corrections
 
 Reopen the same run directory and repeat the same call to reuse a committed
