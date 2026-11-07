@@ -9,7 +9,7 @@ import pytest
 
 pytestmark = pytest.mark.subprocess
 
-EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "simulated_workflow.py"
+EXAMPLE = Path(__file__).resolve().parents[2] / "examples" / "simulated_workflow.py"
 
 
 def invoke(records: Path, workdir: Path, *extra: str) -> subprocess.CompletedProcess[str]:

@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 pytestmark = pytest.mark.unit
-SMOKE = Path(__file__).resolve().parents[1] / "examples" / "smoke_harness.py"
+SMOKE = Path(__file__).resolve().parents[2] / "examples" / "smoke_harness.py"
 
 
 def test_all_smoke_rejects_ambiguous_model_override(tmp_path):

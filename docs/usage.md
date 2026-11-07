@@ -255,7 +255,9 @@ any probe fails. Keyboard interruption still stops the command.
 Use a fresh root directory for a fresh set of model calls. Repeating a successful
 command with the same directory reuses its committed results. Records and raw
 logs remain under each harness's `records` directory. Probes stay manual, outside
-pytest and GitHub CI.
+normal pytest runs and GitHub CI. An explicitly opted-in
+[real-harness test suite](../tests/README.md#real-harness-smoke-tests-manual-opt-in)
+also exercises the README examples and these single-harness commands.
 
 To run just one harness, or override its model:
 

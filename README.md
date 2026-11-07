@@ -173,8 +173,9 @@ uv build
 
 Normal tests use direct parser checks and deterministic subprocess workers;
 they do not call model APIs or require credentials. See [test organization](tests/README.md)
-for selective runs and GitHub CI. Real-harness probes remain
-[manual operations](docs/usage.md#examples-and-real-harness-probes), outside CI.
+for deterministic runs and the explicitly opted-in `tests/live/` smoke suite.
+Real-harness tests consume account usage and stay outside normal runs and CI;
+[manual probe commands](docs/usage.md#examples-and-real-harness-probes) are also available.
 Building creates local artifacts; publishing is a separate step.
 
 ## License

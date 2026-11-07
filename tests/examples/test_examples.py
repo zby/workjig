@@ -12,7 +12,7 @@ import pytest
 
 from workjig import Run, adapters
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 EXAMPLES = ROOT / "examples"
 
 # A deliberately small executable substitute: read the adapter's actual prompt

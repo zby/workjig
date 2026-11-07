@@ -1,20 +1,33 @@
 # Tests
 
+## Organization
+
+| Location | Purpose | Default / CI |
+|---|---|---|
+| `tests/test_*.py` | Runtime unit, file-based and deterministic subprocess tests | Included |
+| `tests/examples/` | Example snippets and commands with deterministic executable substitutes | Included |
+| `tests/live/` | Examples against installed, authenticated Claude, Codex and Pi CLIs | Excluded; explicit opt-in |
+
 The normal suite is deterministic and credential-free. It needs Python and the
 locked development dependencies, not installed coding harnesses or model access.
 Run it from the package root:
 
 ```sh
 uv sync --locked
-uv run pytest                  # everything below
+uv run pytest                  # all deterministic tests; no real model calls
 uv run pytest -m unit          # direct function and file-based tests
 uv run pytest -m subprocess    # deterministic worker-process integration
+uv run pytest tests/examples   # deterministic example coverage
 ```
 
-Every test must have exactly one execution-boundary marker. Collection rejects
-missing or overlapping markers; unknown markers are also errors. Entirely
-subprocess-based modules use a module marker. Mixed modules mark each test.
-Select by boundary with `-m`, and by subject with a filename or `-k`.
+Every test must have exactly one execution-boundary marker (`unit` or
+`subprocess`). Collection rejects missing or overlapping markers; unknown
+markers are also errors. Entirely subprocess-based modules use a module marker.
+Mixed modules mark each test. Select by boundary with `-m`, and by subject with
+a path or `-k`. Live tests additionally carry the `live` marker and must remain
+under `tests/live/`; that directory is excluded unless `--live-smoke` is supplied.
+Explicitly selecting a live test file without the flag fails before execution.
+This is collection separation, not a suite of automatically skipped tests.
 
 ## Where coverage lives
 
@@ -31,23 +44,23 @@ Select by boundary with `-m`, and by subject with a filename or `-k`.
 | `test_continuation.py` | Execution-control changes, total ceilings, usage-stop approval and recovery | Subprocess |
 | `test_continuation_validation.py` | Recorded execution controls and continuation authorization | Unit |
 | `test_review.py` | Regression probes for output attribution and observed parallel limits | Subprocess |
-| `test_examples.py` | README snippets, every example's help entry point, and single/all smoke-probe commands with executable substitutes | Mixed |
-| `test_simulated_harness.py` | Script-backed example delivery, effects, synthetic logs, replay and worker problems | Subprocess |
-| `test_smoke.py` | Manual smoke-command argument validation; launches no harness | Unit |
+| `test_collection.py` | Default exclusion, explicit-file guard and opted-in collection of live tests | Unit |
+| `examples/test_examples.py` | README snippets, every example's help entry point, and single/all probe commands with substitutes | Mixed |
+| `examples/test_simulated_harness.py` | Script-backed example delivery, effects, synthetic logs, replay and worker problems | Subprocess |
+| `examples/test_smoke.py` | Manual probe-command argument validation; launches no harness | Unit |
+| `live/test_readme.py` | README Claude example and Codex/Pi alternatives: delivery and reuse | Live subprocess |
+| `live/test_probes.py` | Real single-harness probe commands: exact file copy and reuse | Live subprocess |
 
 `unit` includes temporary-file tests, not just pure in-memory functions.
 `subprocess` includes tests whose fixtures launch workers, even if the assertion
-itself checks parsing or a persisted record. A subprocess test is not a live
-harness test: the workers are local deterministic programs owned by the test.
+itself checks parsing or a persisted record. In the normal suite those workers
+are local deterministic programs owned by the test, not live harnesses.
 
-Example smoke coverage runs with the normal suite. `test_examples.py` executes
-the README Python snippets and the manual probe's single/all command paths with
-Python executable substitutes, preserving the real factories' remaining arguments
-and output protocols. It also checks `--help` for every Python script in
-`examples/`. Full workflow execution is covered by the ordinary-file cases in
-`test_acceptance.py` and the simulator cases in `test_simulated_harness.py`;
-their worker scripts execute as part of those workflows. These checks need no
-installed harness or credentials and do not establish live-harness compatibility.
+Example coverage preserves the real factories' remaining arguments and output
+protocols while replacing only their executable prefixes with Python scripts.
+Full ordinary-file workflow execution remains in `test_acceptance.py`; the
+simulator workflow lives under `tests/examples/`. Their worker scripts execute
+as part of those workflows. These checks do not establish live compatibility.
 
 Test parsing, classification and validation directly rather than repeating the
 whole runtime lifecycle for every input. Keep representative subprocess cases
@@ -55,12 +68,61 @@ for execution guarantees: files, effects, bounded retries, restart and cleanup.
 Use private temporary state and settle owned processes; missing prerequisites
 are failures, not reasons to skip.
 
+## Real-harness smoke tests (manual opt-in)
+
+**These tests make real model calls and consume account usage.** Install and
+authenticate the CLIs first. The README suite uses the models and permissions
+printed in the README; the probe suite uses the defaults in
+[`examples/smoke_harness.py`](../examples/smoke_harness.py). Those models must be
+available to your accounts. Permissions are not a sandbox: use a suitable test
+environment. No missing prerequisite, authentication failure or unavailable
+model is converted into a skip.
+
+Inspect collection without calling a harness:
+
+```sh
+uv run pytest tests/live --live-smoke --collect-only -q
+```
+
+To deliberately run all six live cases, choose a **fresh private artifact path**:
+
+```sh
+uv run pytest tests/live --live-smoke -v --basetemp=/tmp/my-workjig-live-run
+```
+
+Pytest clears an existing `--basetemp` directory: never point it at valuable
+files or an earlier run you want to retain. Workdirs, records, prompts, delivered
+files and raw logs remain beneath that directory after the run. Without
+`--basetemp`, pytest's normal temporary-directory retention applies. Logs may
+contain sensitive data; inspect before sharing.
+
+Each test permits at most one physical launch with a 180-second timeout and
+checks reuse without an additional launch. The full suite permits up to six
+launches (three README calls and three probe calls), with up to 18 minutes of
+worker wait time plus setup/cleanup overhead. It has no automatic retries.
+README cases check delivery of a nonempty summary, not its semantic quality;
+probe cases check an exact file copy. The single/all command dispatch is also
+tested deterministically, without repeating all live calls in `all` mode.
+
+Select a narrower operation to spend less usage:
+
+```sh
+uv run pytest tests/live/test_readme.py --live-smoke -k claude -v
+uv run pytest tests/live/test_probes.py --live-smoke -k codex -v
+```
+
+These tests are not part of normal CI. Adding or collecting them is not evidence
+that a real invocation passed. Record actual probes, versions and evidence
+limits in [harness evidence](../docs/harness-evidence.md). Direct manual probe
+commands remain available in [usage](../docs/usage.md#examples-and-real-harness-probes).
+
 ## GitHub CI
 
-[CI](../.github/workflows/ci.yml) runs both groups on Linux with Python 3.11–3.14
-on pushes and pull requests. Separate checks run lint, formatting and the build.
-No model credentials, harness installations or real model calls are configured.
-A local pass does not establish that every CI matrix entry has passed remotely.
+[CI](../.github/workflows/ci.yml) runs both deterministic boundary groups on Linux
+with Python 3.11–3.14 and on Windows with Python 3.14. Separate checks run lint,
+formatting and the build. No model credentials, harness installations or real
+model calls are configured. A local pass does not establish that every CI
+matrix entry has passed remotely.
 
 When checking or regenerating `uv.lock`, ignore machine-local uv configuration
 so personal resolver settings do not leak into the shared lockfile:
@@ -71,15 +133,5 @@ uv --no-config lock                 # only when intentionally updating the lock
 uv --no-config sync --locked        # reproduce CI without personal uv settings
 ```
 
-## Real-harness probes stay manual
-
-[`examples/smoke_harness.py`](../examples/smoke_harness.py) deliberately invokes
-an installed harness and model, checks a delivered file, then verifies reuse.
-Real-harness execution stays outside pytest and GitHub CI; the smoke tests run
-this command only with deterministic executable substitutes. See the
-[manual probe commands](../docs/usage.md#examples-and-real-harness-probes).
-
 Captured CLI streams in `adr/evidence/` are static test inputs: replaying them
 in pytest does not invoke the harness or establish current live support.
-Actual probes, tested CLI versions and evidence limits belong in the
-[harness evidence](../docs/harness-evidence.md).
