@@ -503,3 +503,26 @@ def test_invalid_timeout_rejected(value: object) -> None:
 def test_invalid_launch_limit_rejected(value: object) -> None:
     with pytest.raises(ValueError):
         _request(CommandWorker(("echo",)), max_launches=value)
+
+
+@posix_only
+@pytest.mark.subprocess
+def test_worker_path_selects_the_executable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for owner in ("controller", "worker"):
+        tool = tmp_path / owner / "tool"
+        tool.parent.mkdir()
+        tool.write_text(
+            f"#!{sys.executable}\n"
+            "import sys\nfrom pathlib import Path\n"
+            f"Path(sys.argv[1], 'answer.txt').write_text({owner!r})\n"
+        )
+        tool.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tmp_path / 'controller'}{os.pathsep}{os.environ['PATH']}")
+    worker = CommandWorker(("tool", "{output_dir}"), env={"PATH": str(tmp_path / "worker")})
+    with Run(tmp_path / "records", tmp_path) as run:
+        result = run.call(Request("job", "Write answer", {}, ("answer.txt",), worker))
+
+    assert result.status == "delivered"
+    assert dict(result.outputs) == {"answer.txt": "worker"}

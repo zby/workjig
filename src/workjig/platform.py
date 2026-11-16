@@ -89,10 +89,10 @@ def sync_directory(path: Path) -> None:
         os.close(directory_fd)
 
 
-def resolve_command(argv: tuple[str, ...]) -> tuple[str, ...]:
-    """Resolve a console executable through PATH without changing the command contract."""
+def resolve_command(argv: tuple[str, ...], env: Mapping[str, str]) -> tuple[str, ...]:
+    """Resolve a console executable through the worker's PATH, keeping the command contract."""
 
-    executable = shutil.which(argv[0])
+    executable = shutil.which(argv[0], path=env.get("PATH"))
     return (executable, *argv[1:]) if executable is not None else argv
 
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -12,17 +14,36 @@ import workjig.platform as platform
 @pytest.mark.unit
 def test_windows_command_resolution_uses_path_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(platform, "os", SimpleNamespace(name="nt"))
-    monkeypatch.setattr(platform.shutil, "which", lambda _: r"C:\Tools\worker.exe")
+    monkeypatch.setattr(platform.shutil, "which", lambda _, path: r"C:\Tools\worker.exe")
 
-    assert platform.resolve_command(("worker", "--flag")) == (r"C:\Tools\worker.exe", "--flag")
+    assert platform.resolve_command(("worker", "--flag"), {}) == (r"C:\Tools\worker.exe", "--flag")
 
 
 @pytest.mark.unit
 def test_posix_command_resolution_uses_path_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(platform, "os", SimpleNamespace(name="posix"))
-    monkeypatch.setattr(platform.shutil, "which", lambda _: "/tmp/bin/worker")
+    monkeypatch.setattr(platform.shutil, "which", lambda _, path: "/tmp/bin/worker")
 
-    assert platform.resolve_command(("worker", "--flag")) == ("/tmp/bin/worker", "--flag")
+    assert platform.resolve_command(("worker", "--flag"), {}) == ("/tmp/bin/worker", "--flag")
+
+
+@pytest.mark.unit
+def test_command_resolution_searches_the_worker_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    name = "tool.cmd" if os.name == "nt" else "tool"
+    for owner in ("controller", "worker"):
+        (tmp_path / owner).mkdir()
+        (tmp_path / owner / name).write_text("")
+        (tmp_path / owner / name).chmod(0o755)
+    monkeypatch.setenv("PATH", str(tmp_path / "controller"))
+
+    resolved = platform.resolve_command((name, "--flag"), {"PATH": str(tmp_path / "worker")})
+
+    assert resolved == (str(tmp_path / "worker" / name), "--flag")
+    assert platform.resolve_command(("absent-tool",), {"PATH": str(tmp_path / "worker")}) == (
+        "absent-tool",
+    )
 
 
 @pytest.mark.unit

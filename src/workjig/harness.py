@@ -74,7 +74,8 @@ def _read_problem(path: Path) -> tuple[dict[str, str] | None, bool]:
         return None, True
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError):
+    # Deeply nested JSON exhausts the parser's stack rather than failing to parse.
+    except (OSError, UnicodeError, json.JSONDecodeError, RecursionError):
         return None, True
     if (
         not isinstance(value, dict)
@@ -94,7 +95,7 @@ def _read_evidence(path: Path) -> Mapping[str, object] | None:
         # Optional metadata must fit the same strict JSON format as run records.
         # This also rejects overflowing numeric literals and nested nonfinite values.
         json.dumps(value, allow_nan=False)
-    except (OSError, UnicodeError, ValueError):
+    except (OSError, UnicodeError, ValueError, RecursionError):
         return None
     return value if isinstance(value, dict) else None
 
@@ -136,7 +137,7 @@ def launch(
         return launch_error(error)
     try:
         try:
-            process = start_process(resolve_command(argv), workdir, env, stdout, stderr)
+            process = start_process(resolve_command(argv, env), workdir, env, stdout, stderr)
         except OSError as error:
             # Only a failure that left nothing running settles as launch_error.
             # An OwnershipError propagates and leaves the reservation unresolved.

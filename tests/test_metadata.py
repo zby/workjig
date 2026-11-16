@@ -26,6 +26,9 @@ fifo_only = pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFOs are POSI
         ("absent", '{"x":1e400}', "exit", "delivered"),
         ("absent", '{"x":1e400}', "timeout", "timeout"),
         ("absent", '{"x":1e400}', "log_limit", "process_error"),
+        ("deep", "{}", "exit", "protocol_error"),
+        ("absent", "deep", "exit", "delivered"),
+        ("deep", "deep", "timeout", "timeout"),
         pytest.param("fifo", "{}", "exit", "protocol_error", marks=fifo_only),
         pytest.param("absent", "fifo", "exit", "delivered", marks=fifo_only),
         pytest.param("fifo", "fifo", "timeout", "timeout", marks=fifo_only),
@@ -46,6 +49,8 @@ problem, evidence, outputs = map(Path, sys.argv[1:4])
 for path, content in zip((problem, evidence), sys.argv[4:6]):
     if content == 'fifo':
         os.mkfifo(path)
+    elif content == 'deep':
+        path.write_text('[' * 200_000)
     elif content != 'absent':
         path.write_text(content)
 (outputs / 'answer.txt').write_text('done')

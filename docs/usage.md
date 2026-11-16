@@ -38,7 +38,9 @@ with Run(Path("run-records"), Path.cwd()) as run:
 `worker.py` represents your worker executable. It receives the path of a
 generated prompt that lists absolute input and output paths. It must read the
 inputs and write the named files. Standard output is execution evidence, not
-the requested file result. Command arguments are passed without a shell.
+the requested file result. Command arguments are passed without a shell. A
+bare command name is looked up on the worker's `PATH`: the controller's,
+unless the worker's `env` sets its own.
 
 The generic command adapter also accepts `{input_dir}`, `{output_dir}`,
 `{problem_file}`, `{launch_dir}` and `{workdir}` path tokens. Named inputs and

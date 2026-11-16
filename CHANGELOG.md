@@ -4,6 +4,17 @@ Workjig is in early development: releases may change the public API and the
 persisted run-record format without migration. Each entry states what changed
 so callers can update and decide whether existing run directories remain usable.
 
+## Unreleased
+
+- Fixed: a bare command name was looked up on the controller's `PATH` even when
+  the worker's `env` set its own, so a launch could run a different executable
+  than the worker environment named. Lookup now uses the worker's `PATH`.
+- Fixed: a worker problem or evidence file nested too deeply to parse raised
+  `RecursionError` during collection, leaving an exited worker recorded as
+  `running` and the controller uncertain. Such a problem file is now an invalid
+  problem (`protocol_error`) and such an evidence file is ignored, as for other
+  malformed metadata.
+
 ## 0.4.0 - 2026-11-16
 
 Read-only inspection of run records; see ADR 005. The run-record format is
