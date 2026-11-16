@@ -50,14 +50,14 @@ records without taking the lock.
 ```python
 from workjig import read_run
 
-view = read_run(record_dir)          # RunView | None
+view = read_run(record_dir)  # RunView | None
 for call in view.calls:
     call.call_id, call.request_hash  # identity
-    call.request                     # Request rebuilt from recorded work material
-    call.status                      # LaunchStatus, same rule as CallResult.status
-    call.outputs                     # committed outputs, empty unless delivered
-    call.launches                    # tuple[LaunchRecord, ...]
-view.unresolved_launches()           # tuple[LaunchRecord, ...]
+    call.request  # Request rebuilt from recorded work material
+    call.status  # LaunchStatus, same rule as CallResult.status
+    call.outputs  # committed outputs, empty unless delivered
+    call.launches  # tuple[LaunchRecord, ...]
+view.unresolved_launches()  # tuple[LaunchRecord, ...]
 ```
 
 Behavior:
@@ -92,7 +92,7 @@ leaving consumers to spell them:
 ```python
 from workjig import launch_files
 
-files = launch_files(launch)   # paths under launch.launch_dir
+files = launch_files(launch)  # paths under launch.launch_dir
 files.prompt, files.stdout, files.stderr, files.problem, files.inputs, files.outputs
 ```
 
@@ -170,6 +170,35 @@ interprets its content.
     be derived from a `LaunchRecord` alone. The parsed content is already in
     `LaunchRecord.evidence`. Options: leave the file out; or build the paths
     from the call as well as the launch.
+
+### Recommendations for choices 6 to 11
+
+Not approved. Each rests on how Commonplace `794a81126` uses the records
+today, read from source.
+
+- **6: derive paths from the directory given to `read_run`,** as
+  `view.launch_files(launch)`. `audit.collect` already refuses a recorded
+  `launch_dir` outside the run's own `calls/launches` tree, and
+  `observations.refresh` already builds the path from the run root and the
+  launch ID. Neither wants the recorded absolute path.
+- **7: expose the work material as fields of `RecordedCall`** (`task`,
+  `inputs`, `required_outputs`, `optional_outputs`, `worker`) and no
+  `Request`. The readers use `inputs`, `worker.output_protocol` and
+  `worker.name`, never an execution control. This also answers choice 4. A
+  test should fail when `Request` gains a work field the view lacks.
+- **8: reject on load.** `Run` creates an entry and appends its reservation
+  under one lock hold before writing, so no controller writes an empty entry.
+  It is a history “no sequence of reservations could have produced”, which
+  `check_history` exists to reject. This narrows what `Run` accepts.
+- **9: document `view.calls` as unordered across versions.** `audit.collect`
+  and `recorded_calls` list every version, and `observations.refresh` selects
+  by the request hash it already holds. No reader needs an order.
+- **10: document only.** Commonplace already pairs its reader with
+  `busy(record_dir)`. `busy` takes the lock for an instant, so a view that
+  called it could make a controller that is just opening fail with
+  `RunBusyError`, which breaks “no lock”.
+- **11: leave the evidence file out.** No Commonplace code reads it or
+  `LaunchRecord.evidence`.
 
 ## 5. Acceptance
 
