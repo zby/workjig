@@ -54,6 +54,12 @@ acceptance is separate: a resumed workflow reruns its checks against the
 intended input snapshot. It must not use changing sibling output state as an
 implicit input to a parallel check.
 
+A call's history exists only together with its first launch reservation; a
+record holding a call with no launches is rejected. Committed records can also
+be read without the lock, as a validated snapshot that may already be stale.
+Reading never changes a run, and recovery still requires the controller. See
+[ADR 005](../adr/005-read-run-records-through-a-lock-free-view.md).
+
 Resume is an exceptional recovery path, not a way to carry runs across
 incompatible changes. Reuse assumes workflow and runtime code compatible with
 the recorded run and a compatible surrounding environment. A code change is

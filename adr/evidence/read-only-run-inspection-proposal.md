@@ -1,6 +1,10 @@
 # Proposal: read-only inspection of a run's records
 
-Status: open proposal, not approved. It asks for a public API addition; the
+Status: decided and implemented; see
+[ADR 005](../005-read-run-records-through-a-lock-free-view.md). The sketch in
+section 2 is kept as proposed. Where it differs from the recommendations for
+choices 6 to 11, the recommendations were adopted. Choice 1 (Windows) is still
+open, and choice 5 was not taken up. The
 [execution contract](../../docs/design.md) and [usage](../../docs/usage.md)
 remain authoritative.
 
@@ -173,7 +177,7 @@ interprets its content.
 
 ### Recommendations for choices 6 to 11
 
-Not approved. Each rests on how Commonplace `794a81126` uses the records
+Adopted in ADR 005. Each rests on how Commonplace `794a81126` uses the records
 today, read from source.
 
 - **6: derive paths from the directory given to `read_run`,** as
