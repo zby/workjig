@@ -26,13 +26,15 @@ the layout of `run.json` and on the names of the per-launch files:
 | `lib/agentic_analysis/audit.py` `collect` | `request.worker.output_protocol` and `name`, each attempt's `launch_dir`, `launch_id`, `status`; then `stdout.log` and `prompt.txt` | inventory of every launch and transcript scanning |
 | `lib/review_workflows/observations.py` `refresh` | `request.inputs`; then `calls/launches/<id>/stdout.log` | matching calls to a review request and extracting harness evidence |
 
-`headless/harness.py` also builds `launch_dir / "stdout.log"` by name.
+Commonplace also spells launch file names where it already holds a
+`LaunchRecord`: `stdout.log` in `headless/harness.py`, `stderr.log` in
+`headless/jobs.py`, and both logs in `lib/agentic_analysis/audit.py`.
 
 Consequences:
 
-- `run.json` is declared private and unversioned for callers (“do not maintain
-  backward compatibility … for persisted run records”), yet a format change
-  breaks Commonplace silently. The persisted field is still `attempts` while
+- `run.json` is undocumented for callers and carries no compatibility promise
+  (“do not maintain backward compatibility … for persisted run records”), yet
+  a format change breaks Commonplace silently. The persisted field is still `attempts` while
   the API says `launches` (ADR 001), so readers already carry both vocabularies.
 - The readers skip Workjig's validation. `RunState.from_json` checks the
   version, hashes and launch history; the readers index into raw JSON and would
@@ -68,7 +70,8 @@ Behavior:
   both “never started” and the interrupted-first-open case; the caller cannot
   tell them apart from records alone, and inspection should not guess.
 - **No working-directory check.** `RunView.workdir` reports the recorded value.
-  The reader may be running elsewhere, for example over a copied run.
+  The reader may be running elsewhere, for example over a copied run; see
+  open choice 6 for what that means for launch paths.
 - **A snapshot of one file.** `run.json` is replaced atomically, so the view is
   one committed state. It can be stale by the time it is used. Launch files of
   a `reserved` or `running` launch may still be changing.
@@ -133,6 +136,40 @@ interprets its content.
 5. **Renaming the persisted `attempts` field.** Once no consumer parses the
    file, the format can follow ADR 001's vocabulary. That is a record-format
    change and a separate approval.
+6. **Launch paths over a copied run.** `LaunchRecord.launch_dir` is recorded
+   as an absolute path, so `launch_files(launch)` over a copied or moved run
+   points at the original location. The controller always creates
+   `<record_dir>/launches/<launch_id>`. Options: derive the paths from the
+   directory given to `read_run`, for example `view.launch_files(launch)`; or
+   keep the recorded path and drop the copied-run claim in section 2.
+7. **Execution controls on the rebuilt `Request`.** Only work material is
+   persisted per call, so a rebuilt `Request` would carry the class defaults
+   for `timeout_seconds`, `max_launches` and `retry`, not the values used. The
+   effective values are on each `LaunchRecord`. Options: expose the work
+   material without a `Request`; or return a `Request` and document those
+   three fields as meaningless in a view.
+8. **A call with no launches.** `RunState.from_json` accepts an entry with
+   empty `attempts` and no result, but the status rule in `Run._result`
+   raises on it. The controller does not write such an entry today, and
+   Commonplace's `recorded_calls` skips one. Options: reject it on load, which
+   also tightens what `Run` accepts; omit it from the view; or give
+   `RecordedCall.status` a `None` value.
+9. **Order of a call's versions.** `run.json` is written with sorted keys, so
+   several work-material versions of one call ID load in hash order, not in
+   the order they were made, and a reserved launch has no timestamp. The view
+   cannot say which version is current. Options: document `view.calls` as
+   unordered and leave selection to the caller, which holds the request hash
+   from its `CallResult`; or record an order, which is a record-format change.
+10. **Unsettled is not stale.** While a controller is working,
+    `view.unresolved_launches()` includes that controller's own live launches.
+    A reader can separate the cases only by also asking `busy(record_dir)`,
+    and that answer can change between the two reads. Decide whether the view
+    only documents this or reports the lock state itself.
+11. **The evidence file.** `launch_files` as sketched omits it. Its name comes
+    from `request.worker.evidence_file`, default `evidence.json`, so it cannot
+    be derived from a `LaunchRecord` alone. The parsed content is already in
+    `LaunchRecord.evidence`. Options: leave the file out; or build the paths
+    from the call as well as the launch.
 
 ## 5. Acceptance
 
@@ -142,8 +179,8 @@ interprets its content.
 - A subprocess test: `read_run` succeeds while another process holds the run
   open, and the controller's next commit succeeds afterward.
 - `RecordedCall.status` and `CallResult.status` come from one shared rule.
-- Commonplace replaces its three readers and the `stdout.log` path
-  construction with this API, with no behavior change in its status, audit and
+- Commonplace replaces its three readers and every launch file path it builds
+  by name with this API, with no behavior change in its status, audit and
   observation outputs. That change is made and verified in Commonplace.
 
 ## 6. Alternatives considered
