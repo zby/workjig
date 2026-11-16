@@ -10,7 +10,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
-from .models import LaunchRecord, LaunchStatus, Request
+from .models import LaunchRecord, LaunchStatus, Request, launch_files_under
 from .outcomes import terminal_failure
 from .platform import OwnedProcess, resolve_command, start_process
 
@@ -23,13 +23,14 @@ def prepare(
     request: Request, launch_dir: Path, workdir: Path
 ) -> tuple[Mapping[str, Path], tuple[str, ...]]:
     """Write fresh inputs and a human-readable task frame before reservation."""
-    input_dir = launch_dir / "inputs"
-    output_dir = launch_dir / "outputs"
+    files = launch_files_under(launch_dir)
+    input_dir = files.inputs
+    output_dir = files.outputs
     input_dir.mkdir()
     output_dir.mkdir()
     for name, content in request.inputs.items():
         (input_dir / name).write_text(content, encoding="utf-8")
-    prompt = launch_dir / "prompt.txt"
+    prompt = files.prompt
     lines = ["Task:", request.task, "", "Inputs (read these exact files):"]
     lines.extend(f"- {name}: {input_dir / name}" for name in sorted(request.inputs))
     lines.extend(["", "Required outputs (write these exact files):"])
@@ -41,7 +42,7 @@ def prepare(
         [
             "",
             "If unable to finish, write a JSON object to this problem file:",
-            str(launch_dir / "problem.json"),
+            str(files.problem),
             'Use {"kind":"unable","message":"..."} or {"kind":"usage_limit","message":"..."}.',
         ]
     )
@@ -50,7 +51,7 @@ def prepare(
         "prompt": prompt,
         "input_dir": input_dir,
         "output_dir": output_dir,
-        "problem_file": launch_dir / "problem.json",
+        "problem_file": files.problem,
         "evidence_file": launch_dir / (request.worker.evidence_file or "evidence.json"),
         "launch_dir": launch_dir,
         "workdir": workdir,
@@ -108,8 +109,8 @@ def launch(
 ) -> tuple[LaunchRecord, dict[str, str]]:
     """Invoke once, terminate its process group, then collect only its outputs."""
     started_at = _now()
-    stdout_path = Path(reserved.launch_dir) / "stdout.log"
-    stderr_path = Path(reserved.launch_dir) / "stderr.log"
+    located = launch_files_under(Path(reserved.launch_dir))
+    stdout_path, stderr_path = located.stdout, located.stderr
     env = os.environ.copy()
     env.update(request.worker.env)
 

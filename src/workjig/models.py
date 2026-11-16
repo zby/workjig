@@ -62,6 +62,31 @@ _PATH_TOKENS = {
     "workdir",
 }
 _PATH_TOKEN_RE = re.compile(r"\{(" + "|".join(_PATH_TOKENS) + r")\}")
+# The fixed entries of every launch directory, keyed by LaunchFiles field.
+_LAUNCH_FILE_NAMES = {
+    "prompt": "prompt.txt",
+    "stdout": "stdout.log",
+    "stderr": "stderr.log",
+    "problem": "problem.json",
+    "inputs": "inputs",
+    "outputs": "outputs",
+}
+
+
+@dataclass(frozen=True)
+class LaunchFiles:
+    """Locations of one launch's fixed files; any of them may not exist."""
+
+    prompt: Path
+    stdout: Path
+    stderr: Path
+    problem: Path
+    inputs: Path
+    outputs: Path
+
+
+def launch_files_under(launch_dir: Path) -> LaunchFiles:
+    return LaunchFiles(**{key: launch_dir / name for key, name in _LAUNCH_FILE_NAMES.items()})
 
 
 def _safe_name(value: str) -> str:
@@ -154,8 +179,7 @@ class CommandWorker:
             if (
                 not isinstance(self.evidence_file, str)
                 or not _SAFE_NAME.fullmatch(self.evidence_file)
-                or self.evidence_file
-                in {"inputs", "outputs", "prompt.txt", "problem.json", "stdout.log", "stderr.log"}
+                or self.evidence_file in _LAUNCH_FILE_NAMES.values()
             ):
                 raise ValueError("unsafe evidence file name")
         if self.output_protocol is not None and (

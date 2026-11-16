@@ -11,6 +11,7 @@ import hashlib
 import json
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field, fields
+from pathlib import Path
 
 from .models import (
     UNSETTLED_STATUSES,
@@ -27,7 +28,7 @@ RECORD_VERSION = 2
 _LAUNCH_FIELDS = frozenset(item.name for item in fields(LaunchRecord))
 # Work material is every Request field that is neither the call key nor a
 # declared execution control, so a new field cannot be left out by mistake.
-_WORK_FIELDS = tuple(
+WORK_FIELDS = tuple(
     item.name
     for item in fields(Request)
     if item.name != "call_id" and not item.metadata.get("execution_control")
@@ -52,7 +53,7 @@ def _plain(value: object) -> object:
 
 def request_material(request: Request) -> dict[str, object]:
     """Identity-bearing work material; execution controls are excluded."""
-    return {name: _plain(getattr(request, name)) for name in _WORK_FIELDS}
+    return {name: _plain(getattr(request, name)) for name in WORK_FIELDS}
 
 
 def material_hash(material: Mapping[str, object]) -> str:
@@ -63,7 +64,7 @@ def material_hash(material: Mapping[str, object]) -> str:
 
 
 def _request_from_material(call_id: str, material: object) -> Request:
-    if not isinstance(material, dict) or set(material) != set(_WORK_FIELDS):
+    if not isinstance(material, dict) or set(material) != set(WORK_FIELDS):
         raise RecordError("invalid request material")
     worker = material["worker"]
     if not isinstance(worker, dict) or set(worker) != set(_WORKER_FIELDS):
@@ -71,7 +72,7 @@ def _request_from_material(call_id: str, material: object) -> Request:
     try:
         request = Request(
             call_id=call_id,
-            **{name: material[name] for name in _WORK_FIELDS if name != "worker"},
+            **{name: material[name] for name in WORK_FIELDS if name != "worker"},
             worker=CommandWorker(**worker),
         )
     except (KeyError, TypeError, ValueError) as error:
@@ -197,9 +198,21 @@ class CallEntry:
         entry.check_history()
         return entry
 
+    @property
+    def status(self) -> LaunchStatus:
+        """Delivered if a result is committed, else the latest launch's status."""
+        if self.delivery is not None:
+            return LaunchStatus.DELIVERED
+        if not self.launches:
+            raise RecordError("call has neither result nor launch")
+        return self.launches[-1].status
+
     def check_history(self) -> None:
         """Reject histories that no sequence of reservations could have produced."""
         launches = self.launches
+        # An entry is created together with its first reservation.
+        if not launches:
+            raise RecordError("call record has no launches")
         if any(
             launch.status in UNSETTLED_STATUSES or launch.status == LaunchStatus.DELIVERED
             for launch in launches[:-1]
@@ -226,18 +239,17 @@ class CallEntry:
                 raise RecordError("unauthorized continuation")
             if not set(launch.missing_outputs) <= required:
                 raise RecordError("launch names undeclared missing outputs")
-        last = launches[-1] if launches else None
+        last = launches[-1]
         if self.delivery is not None:
             declared = required | set(self.request.optional_outputs)
             if (
                 not required <= set(self.delivery.outputs)
                 or not set(self.delivery.outputs) <= declared
-                or last is None
                 or last.status != LaunchStatus.DELIVERED
                 or self.delivery.launch_id != last.launch_id
             ):
                 raise RecordError("invalid delivered result record")
-        elif last is not None and last.status == LaunchStatus.DELIVERED:
+        elif last.status == LaunchStatus.DELIVERED:
             raise RecordError("delivered launch has no result record")
 
 
@@ -308,3 +320,17 @@ class RunState:
                 entries[request_hash] = entry
             calls[call_id] = entries
         return cls(workdir=value["workdir"], calls=calls)
+
+
+def load_state(path: Path) -> RunState | None:
+    """Read and validate ``run.json``; None when the file does not exist."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    except (OSError, UnicodeError) as error:
+        raise RecordError(f"cannot read run record: {error}") from error
+    try:
+        return RunState.from_json(json.loads(text))
+    except (json.JSONDecodeError, TypeError, ValueError) as error:
+        raise RecordError(f"cannot read run record: {error}") from error

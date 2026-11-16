@@ -42,6 +42,7 @@ This is collection separation, not a suite of automatically skipped tests.
 | `test_metadata.py` | Untrusted worker problem/evidence files, including FIFOs and timeouts | Subprocess |
 | `test_record_validation.py` | Corruption and lifecycle validation against records produced by deterministic workers | Subprocess |
 | `test_continuation.py` | Execution-control changes, total ceilings, usage-stop approval and recovery | Subprocess |
+| `test_view.py` | Read-only record view: validation, snapshots, launch paths, reading beside a live controller | Mixed |
 | `test_continuation_validation.py` | Recorded execution controls and continuation authorization | Unit |
 | `test_review.py` | Regression probes for output attribution and observed parallel limits | Subprocess |
 | `test_collection.py` | Default exclusion, explicit-file guard and opted-in collection of live tests | Unit |

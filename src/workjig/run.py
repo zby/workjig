@@ -32,6 +32,7 @@ from .records import (
     Delivery,
     RecordError,
     RunState,
+    load_state,
     material_hash,
     request_material,
 )
@@ -152,12 +153,8 @@ class Run:
             self._owned_launches.clear()
 
     def _load_or_create(self, lock: RunLock) -> RunState:
-        state_path = self.record_dir / "run.json"
-        if state_path.exists():
-            try:
-                state = RunState.from_json(json.loads(state_path.read_text(encoding="utf-8")))
-            except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError) as error:
-                raise RecordError(f"cannot read run record: {error}") from error
+        state = load_state(self.record_dir / "run.json")
+        if state is not None:
             if state.workdir != str(self.workdir):
                 raise RecordError("run workdir differs from recorded workdir")
             return state
@@ -362,14 +359,8 @@ class Run:
 
     def _result(self, entry: CallEntry, request: Request, reused: bool) -> CallResult:
         launches = tuple(entry.launches)
-        if entry.delivery is not None:
-            status = LaunchStatus.DELIVERED
-            outputs: Mapping[str, str] = entry.delivery.outputs
-        elif launches:
-            status = launches[-1].status
-            outputs = {}
-        else:
-            raise RecordError("call has neither result nor attempt")
+        status = entry.status
+        outputs = entry.delivery.outputs if entry.delivery is not None else {}
         return CallResult(
             call_id=request.call_id,
             request_hash=entry.request_hash,

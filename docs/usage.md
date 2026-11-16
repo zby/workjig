@@ -220,6 +220,47 @@ terminal record. If `run.json` is missing from an existing record directory,
 preserve that directory, confirm any old workers have stopped, and choose a
 fresh directory and launch allowances deliberately.
 
+## Inspecting records
+
+`read_run(record_dir)` returns a validated, immutable `RunView` of the
+committed `run.json` without taking the run lock, so status commands and
+audits can read while a controller works. It writes nothing and creates no
+file or directory. It returns `None` when there is no `run.json` (absent,
+empty or only partly initialised directory) and raises `RecordError` for a
+record `Run` would reject. It does not check the working directory;
+`view.workdir` reports the recorded one.
+
+```python
+from pathlib import Path
+
+from workjig import read_run
+
+view = read_run(Path("run-records"))
+if view is not None:
+    for call in view.calls:
+        print(call.call_id, call.request_hash, call.status, call.worker.name)
+        for launch in call.launches:
+            print(view.launch_files(launch).stdout)
+```
+
+`view.calls` holds one `RecordedCall` per call ID and work-material version,
+in no meaningful order; select a version by `request_hash`. Each exposes the
+recorded work material (`task`, `inputs`, `required_outputs`,
+`optional_outputs`, `worker`), `status` by the same rule as
+`CallResult.status`, committed `outputs` (empty unless delivered) and its
+`launches`. Execution controls are on each `LaunchRecord`, not the call.
+
+`view.launch_files(launch)` gives the `prompt`, `stdout`, `stderr`, `problem`,
+`inputs` and `outputs` locations under the directory passed to `read_run`, so
+they follow a copied or moved run. A location may not exist.
+
+The view is one committed state and may be stale when used; files of a
+`reserved` or `running` launch may still be changing.
+`view.unresolved_launches()` returns those launches, including a live
+controller's own active ones. `busy(record_dir)` asks separately whether a
+controller holds the lock; the two answers can change between reads.
+Acknowledging a stopped launch still requires an open `Run`.
+
 ## Boundaries
 
 Separate output directories prevent accidental reuse of another launch's

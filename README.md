@@ -151,8 +151,8 @@ checks, corrections and resume without a model.
 
 ## Documentation
 
-- [Usage and recovery](docs/usage.md) — adapters, retries, outcomes, parallel calls
-  and recovery procedures.
+- [Usage and recovery](docs/usage.md) — adapters, retries, outcomes, parallel calls,
+  recovery procedures and read-only record inspection with `read_run`.
 - [Execution contract](docs/design.md) — guarantees and limits.
 - [Design rationale](docs/design-rationale.md) and [decision records](adr/README.md)
   — reasons, alternatives and tradeoffs.

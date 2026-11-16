@@ -4,6 +4,16 @@ Workjig is in early development: releases may change the public API and the
 persisted run-record format without migration. Each entry states what changed
 so callers can update and decide whether existing run directories remain usable.
 
+## Unreleased
+
+- Added `read_run(record_dir)`, a lock-free, read-only and validated view of a
+  run's committed records, returning `RunView` (with `RecordedCall` entries and
+  `launch_files(launch)` returning `LaunchFiles`) or `None` without
+  `run.json`. See `docs/usage.md`.
+- Loading a run record, by `Run` or `read_run`, now rejects a call entry with no
+  launches with `RecordError`. The controller never writes one. The run-record
+  format is otherwise unchanged.
+
 ## 0.3.1 - 2026-11-03
 
 Fixed: on Windows the run lock made `.lock` unreadable through other handles
