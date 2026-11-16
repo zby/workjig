@@ -4,7 +4,10 @@ Workjig is in early development: releases may change the public API and the
 persisted run-record format without migration. Each entry states what changed
 so callers can update and decide whether existing run directories remain usable.
 
-## Unreleased
+## 0.4.0 - 2026-11-16
+
+Read-only inspection of run records; see ADR 005. The run-record format is
+unchanged, but loading is stricter in one case.
 
 - Added `read_run(record_dir)`, a lock-free, read-only and validated view of a
   run's committed records, returning `RunView` (with `RecordedCall` entries and
