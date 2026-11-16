@@ -44,6 +44,10 @@ second runtime or a substitute for maintained tests.
   reviews and CI observations behind [ADR 004](../004-own-windows-workers-with-job-objects.md),
   which owns Windows launches with job objects.
 
+- [Read-only run inspection](read-only-run-inspection-proposal.md): an open
+  proposal for reading a run's records without the controller lock, with the
+  Commonplace readers that currently parse `run.json` directly.
+
 ## Existing evidence
 
 These materials remain at their current locations; link rather than duplicate:
