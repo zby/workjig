@@ -19,6 +19,7 @@ from workjig import (
     RecordedCall,
     RecordError,
     Request,
+    locking,
     read_run,
 )
 from workjig.records import Delivery, RunState, launch_to_json, material_hash, request_material
@@ -137,7 +138,7 @@ def test_view_reports_recorded_calls(records: Path) -> None:
 def test_view_is_immutable(records: Path) -> None:
     view = read_run(records)
     assert view is not None
-    call = view.calls[0]
+    call = next(call for call in view.calls if call.call_id == "delivered")
     with pytest.raises(FrozenInstanceError):
         view.workdir = "/elsewhere"  # type: ignore[misc]
     with pytest.raises(FrozenInstanceError):
@@ -188,6 +189,21 @@ def test_reading_creates_nothing(records: Path, tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
+def test_reading_never_touches_the_lock(records: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    lock = records / ".lock"
+    lock.write_bytes(b"")
+    before = lock.stat().st_mtime_ns
+
+    def refuse(*_: object, **__: object) -> None:
+        raise AssertionError("read_run must not open or take the run lock")
+
+    monkeypatch.setattr(locking.RunLock, "acquire", refuse)
+    monkeypatch.setattr(locking, "file_lock", refuse)
+    assert read_run(records) is not None
+    assert lock.stat().st_mtime_ns == before
+
+
+@pytest.mark.unit
 def test_absent_record_is_none(tmp_path: Path) -> None:
     assert read_run(tmp_path / "absent") is None
     empty = tmp_path / "empty"
@@ -203,7 +219,9 @@ def test_absent_record_is_none(tmp_path: Path) -> None:
         json.dumps({"version": 1, "workdir": "/w", "calls": {}}),
         json.dumps({"version": 3, "workdir": "/w", "calls": {}}),
         b"\xff\xfe",
+        "[" * 200_000,
     ],
+    ids=["not-json", "version-1", "version-3", "not-utf8", "nested-too-deeply"],
 )
 @pytest.mark.unit
 def test_corrupt_or_unsupported_record_raises(tmp_path: Path, content: str | bytes) -> None:

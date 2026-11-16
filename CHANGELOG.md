@@ -9,7 +9,11 @@ so callers can update and decide whether existing run directories remain usable.
 - Added `read_run(record_dir)`, a lock-free, read-only and validated view of a
   run's committed records, returning `RunView` (with `RecordedCall` entries and
   `launch_files(launch)` returning `LaunchFiles`) or `None` without
-  `run.json`. See `docs/usage.md`.
+  `run.json`. See `docs/usage.md`. Reading beside a live controller is
+  exercised on Linux only; on Windows it may make the controller's commit
+  fail, which is neither reproduced nor ruled out.
+- A `run.json` nested too deeply to parse now raises `RecordError` instead of
+  `RecursionError`.
 - Loading a run record, by `Run` or `read_run`, now rejects a call entry with no
   launches with `RecordError`. The controller never writes one. The run-record
   format is otherwise unchanged.

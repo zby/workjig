@@ -332,5 +332,6 @@ def load_state(path: Path) -> RunState | None:
         raise RecordError(f"cannot read run record: {error}") from error
     try:
         return RunState.from_json(json.loads(text))
-    except (json.JSONDecodeError, TypeError, ValueError) as error:
+    # Deeply nested JSON exhausts the parser's stack rather than failing to parse.
+    except (TypeError, ValueError, RecursionError) as error:
         raise RecordError(f"cannot read run record: {error}") from error

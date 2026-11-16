@@ -261,6 +261,12 @@ controller's own active ones. `busy(record_dir)` asks separately whether a
 controller holds the lock; the two answers can change between reads.
 Acknowledging a stopped launch still requires an open `Run`.
 
+Reading beside a live controller is exercised on Linux only. On Windows a
+reader that has `run.json` open while the controller replaces it may make that
+commit fail, which leaves the controller uncertain and its launch unresolved;
+this has not been reproduced or ruled out. Until it is, read on Windows only
+when no controller is working.
+
 ## Boundaries
 
 Separate output directories prevent accidental reuse of another launch's
