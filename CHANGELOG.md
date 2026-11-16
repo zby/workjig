@@ -4,7 +4,11 @@ Workjig is in early development: releases may change the public API and the
 persisted run-record format without migration. Each entry states what changed
 so callers can update and decide whether existing run directories remain usable.
 
-## Unreleased
+## 0.4.1 - 2026-11-16
+
+Two fixes found in review before 0.4.0 was uploaded; 0.4.0 was tagged but not
+published to PyPI. The public API and run-record format are unchanged from
+0.4.0.
 
 - Fixed: a bare command name was looked up on the controller's `PATH` even when
   the worker's `env` set its own, so a launch could run a different executable
