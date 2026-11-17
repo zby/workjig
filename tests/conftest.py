@@ -1,5 +1,7 @@
 """Require an explicit execution boundary for every collected test."""
 
+import subprocess
+from collections.abc import Generator
 from pathlib import Path
 
 import pytest
@@ -37,3 +39,21 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
             raise pytest.UsageError(
                 f"{item.nodeid}: mark each test with exactly one of 'unit' or 'subprocess'"
             )
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(
+    item: pytest.Item, call: pytest.CallInfo[None]
+) -> Generator[None, object, None]:
+    """Show a failed child process's captured output, which its exception hides."""
+    outcome = yield
+    error = call.excinfo.value if call.excinfo is not None else None
+    if not isinstance(error, subprocess.CalledProcessError | subprocess.TimeoutExpired):
+        return
+    report = outcome.get_result()  # type: ignore[attr-defined]
+    for name in ("stdout", "stderr"):
+        text = getattr(error, name)
+        if text:
+            if isinstance(text, bytes):
+                text = text.decode(errors="replace")
+            report.sections.append((f"Child process {name}", text))
