@@ -4,7 +4,7 @@ Workjig is in early development: releases may change the public API and the
 persisted run-record format without migration. Each entry states what changed
 so callers can update and decide whether existing run directories remain usable.
 
-## Unreleased
+## 0.5.0 - 2026-11-19
 
 - Windows run-manifest readers permit atomic replacement while inspecting an
   active run. Example workers now copy exact bytes or emit explicit LF output
