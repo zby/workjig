@@ -147,13 +147,59 @@ def pi_worker(
     )
 
 
-def parse_evidence(harness: Literal["codex", "claude", "pi"], stdout: str) -> dict[str, object]:
+def agy_worker(
+    model: str,
+    *,
+    mode: Literal["accept-edits", "auto", "plan"] | None = None,
+    sandbox: bool = True,
+    effort: Literal["low", "medium", "high", "xhigh", "max"] | None = None,
+) -> CommandWorker:
+    """Construct an Antigravity CLI (agy 1.5.12) one-shot worker.
+
+    When ``mode`` is omitted, ``agy`` uses its default headless mode, which
+    auto-approves sandboxed commands when ``sandbox=True`` and denies actions
+    that require interactive approval. ``--dangerously-skip-permissions`` is
+    not set; the caller remains responsible for host isolation and record-path
+    access.
+    """
+    _required_text(model, "model")
+    if mode is not None and mode not in {"accept-edits", "auto", "plan"}:
+        raise ValueError("unsupported agy mode")
+    if type(sandbox) is not bool:
+        raise ValueError("sandbox must be a boolean")
+    if effort is not None and effort not in {"low", "medium", "high", "xhigh", "max"}:
+        raise ValueError("unsupported agy effort")
+    argv = [
+        "agy",
+        "--output-format",
+        "stream-json",
+        "--model",
+        model,
+        "--disable-slash-commands",
+    ]
+    if mode is not None:
+        argv.extend(("--mode", mode))
+    if sandbox:
+        argv.append("--sandbox")
+    if effort is not None:
+        argv.extend(("--effort", effort))
+    argv.extend(("-p", _PROMPT_POINTER))
+    return CommandWorker(
+        argv=tuple(argv),
+        name="agy",
+        output_protocol="agy-stream-json",
+    )
+
+
+def parse_evidence(
+    harness: Literal["codex", "claude", "pi", "agy"], stdout: str
+) -> dict[str, object]:
     """Extract documented fields from retained JSONL without guessing identity.
 
     Raw stdout remains authoritative evidence. Parsing a partial stream yields
     only fields actually present; callers retain parse_errors for diagnosis.
     """
-    if harness not in {"codex", "claude", "pi"}:
+    if harness not in {"codex", "claude", "pi", "agy"}:
         raise ValueError("unknown harness")
     records: list[dict[str, object]] = []
     parse_errors = 0
@@ -210,6 +256,38 @@ def parse_evidence(harness: Literal["codex", "claude", "pi"], stdout: str) -> di
                     evidence["is_error"] = record["is_error"]
         if retry_errors:
             evidence["retry_error_categories"] = retry_errors
+        return evidence
+
+    if harness == "agy":
+        for record in records:
+            event = record.get("event")
+            if event == "init":
+                cid = record.get("conversation_id")
+                if isinstance(cid, str) and cid:
+                    evidence["session_id"] = cid
+                init = record.get("init")
+                if isinstance(init, dict):
+                    if isinstance(init.get("model"), str) and init["model"]:
+                        evidence["reported_model"] = init["model"]
+                    if isinstance(init.get("permission_mode"), str) and init["permission_mode"]:
+                        evidence["permission_mode"] = init["permission_mode"]
+            if event == "result":
+                result = record.get("result")
+                if isinstance(result, dict):
+                    cid = result.get("conversation_id")
+                    if isinstance(cid, str) and cid:
+                        evidence["session_id"] = cid
+                    if isinstance(result.get("status"), str) and result["status"]:
+                        evidence["result_status"] = result["status"]
+                    if isinstance(result.get("finished_reason"), str) and result["finished_reason"]:
+                        evidence["finished_reason"] = result["finished_reason"]
+                    if isinstance(result.get("error"), str) and result["error"]:
+                        evidence["error_message"] = result["error"]
+                    if isinstance(result.get("usage"), dict):
+                        evidence["usage"] = result["usage"]
+                    denied = result.get("denied_actions")
+                    if isinstance(denied, list) and denied:
+                        evidence["denied_actions"] = denied
         return evidence
 
     for record in records:

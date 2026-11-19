@@ -2,7 +2,7 @@
 
 A Python workflow runtime that orchestrates headless LLM harnesses.
 
-Run Claude Code, Codex and Pi as subprocess workers. You write the workflow
+Run Claude Code, Codex, Pi and Antigravity CLI (`agy`) as subprocess workers. You write the workflow
 in Python; Workjig handles launches, separate output
 paths, bounded execution and durable run records.
 
@@ -107,11 +107,11 @@ Run this example in a working directory you are comfortable letting the harness
 access. Repeating it with the same records and declared work reuses the delivery
 rather than making another model call.
 
-To use Codex or Pi instead, replace the `worker` definition before constructing
+To use Codex, Pi or Antigravity CLI instead, replace the `worker` definition before constructing
 the request (install and authenticate the corresponding CLI first):
 
 ```python
-from workjig.adapters import codex_worker, pi_worker
+from workjig.adapters import agy_worker, codex_worker, pi_worker
 
 # Codex CLI: choose a model available to your account.
 worker = codex_worker("gpt-6.1-sol", sandbox="workspace-write", effort="low")
@@ -123,6 +123,9 @@ worker = pi_worker(
     tools=("read", "write"),
     project_trust="no-approve",
 )
+
+# Or Antigravity CLI (agy): choose a model available to your account.
+worker = agy_worker("gemini-3.8-flash-low")
 ```
 
 These factories construct command configurations, not model clients. See

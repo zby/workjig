@@ -79,7 +79,7 @@ sandboxed nor transactional; keep tests in private temporary directories.
 ### Substituting a concrete harness executable
 
 The universal script above uses a generic command protocol; it does not accept
-the actual CLI arguments of the three built-in adapters. For an adapter-specific
+the actual CLI arguments of the built-in adapters. For an adapter-specific
 test, replace only its executable prefix and retain its remaining arguments
 and output protocol:
 
@@ -101,8 +101,9 @@ fake = replace(
 It must accept the adapter's real argument shape (including its task-file
 pointer), implement the needed file effects, and emit representative Codex
 events on stdout. It should reject unexpected arguments so invocation changes
-are visible. The same replacement technique works for Claude and Pi factories;
-their arguments and terminal-event schemas differ. No executable-override API
+are visible. The same replacement technique works for the Claude, Pi and
+Antigravity (`agy`) factories; their arguments and terminal-event schemas
+differ. No executable-override API
 is required.
 
 Such tests exercise invocation construction and classification against an

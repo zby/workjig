@@ -29,14 +29,32 @@ not treat help inspection or synthetic parsing tests as live execution evidence.
 - JSON mode starts with a `session` header containing ID and cwd. `message_end.message` is the authoritative completed message; assistant messages contain `provider`, requested `model`, optional actual `responseModel` and `responseId`, usage, `stopReason`, and optional `errorMessage`. `agent_end` may precede automatic retry; `agent_settled` closes automatic work. Retain the raw stream, stderr, exit code, session ID, and completed assistant model fields. Installed `docs/json.md` and `docs/message-types.md`; [upstream JSON docs](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/json.md).
 - Failure evidence: completed assistant `stopReason` can be `error`, `aborted`, `length`, or `deferred`; `errorMessage` is optional. `tool_execution_end.isError` concerns a tool call, not necessarily the whole run. `auto_retry_start` and `auto_retry_end` disclose internal attempts, with `finalError` on final retry failure. Do not classify all errors as retriable or treat `agent_end` alone as completion. No version-specific stable usage-limit marker was established. Installed `docs/json.md` and `docs/message-types.md`.
 
+## Antigravity CLI (`agy`)
+
+Inspected and probed 2026-11-19.
+
+- Installed executable: `/home/zby/.local/bin/agy`; version `1.5.12`. `agy --version`, `agy --help`, and `agy models` completed. Startup writes to `~/.gemini/antigravity-cli` (such as `installation_id` and logs), so read-only filesystem sandboxes prevent `agy` from starting.
+- Candidate invocation: run in the selected working directory with `agy --output-format stream-json --model <model> --disable-slash-commands [--mode <accept-edits|auto|plan>] [--sandbox] [--effort <low|medium|high|xhigh|max>] -p 'Read ... <prompt-path>...'`. In `1.5.12`, `-p` / `--print` takes the prompt string as its option value rather than as a separate positional argument; placing `-p <prompt>` last satisfies Go flag parsing while keeping the prompt pointer at the end of `argv`. `--dangerously-skip-permissions` is omitted.
+- Mode and permission observations in `1.5.12`:
+  - With `--mode accept-edits --sandbox`, a `run_command` attempt (`cp`) was auto-denied in headless mode (`denied_actions: [{"action": "command", "display_name": "Bash"}]` on the `result` event, diagnostic on stderr, exit 0 without producing `answer.txt`).
+  - With `--mode auto --sandbox`, `agy` emitted a stderr warning that `--mode auto` was not available for the tested account and fell back to the default mode.
+  - With `--mode` omitted and `--sandbox` enabled, sandboxed commands ran without prompting, stderr was empty, and `answer.txt` was written cleanly. `agy_worker` therefore defaults to `mode=None` and `sandbox=True`.
+- `stream-json` wire format observed in `1.5.12`: JSONL records use `"event"` (not `"type"`) as the top-level discriminator. Observed events are:
+  - `{"event": "init", "conversation_id": "<uuid>", "init": {"model": "<model>", "cwd": "...", "tools": [...], "permission_mode": "..."}}`
+  - `{"event": "step_update", "step_update": {"conversation_id": "<uuid>", "step_index": ..., "state": "ACTIVE"|"DONE", "step_type": "user_input"|"agent_response"|"tool", ...}}`
+  - `{"event": "result", "result": {"conversation_id": "<uuid-or-empty>", "status": "SUCCESS"|"ERROR", "response": "...", "error": "<string>", "finished_reason": "error", "duration_seconds": ..., "num_turns": ..., "usage": {...}, "denied_actions": [...]}}`
+- Failure evidence: an invalid `--model` probe exited `1` and emitted a single `result` event with `conversation_id: ""`, `status: "ERROR"`, `finished_reason: "error"`, and a string `error` field. `agy-stream-json` selects the final `result` event (resetting on later `init` or `step_update`), treats `status: "SUCCESS"` with empty/absent `finished_reason` and `error` as a clean terminal event, and classifies `status: "ERROR"` via the existing terminal-error quota matcher on `result.error`. Real quota exhaustion was not induced; quota classification for `agy-stream-json` is covered by synthetic unit and subprocess tests only.
+- Native session tracking (`track_native_session`) is deferred and rejected for `agy-stream-json`.
+
 ## Adapter gate
 
 Help inspection establishes command forms, not successful execution. The bounded
 real probes below establish file delivery and cached reuse for the listed Codex,
-Pi and Claude versions. Their scope does not establish every failure mode or
-permission configuration. Failure parsing also has synthetic test coverage,
-which is distinct from those probes. Future probes need a controlled location
-and suitable permissions, including for Pi's trust lock; do not change existing
+Pi, Claude and Antigravity CLI (`agy`) versions. Their scope does not establish
+every failure mode or permission configuration. Failure parsing also has
+synthetic test coverage, which is distinct from those probes. Future probes need
+a controlled location and suitable permissions, including for Pi's trust lock
+and `agy`'s `~/.gemini/antigravity-cli` state directory; do not change existing
 trust or credentials to make a probe pass.
 
 ## Real probes, 2026-10-19
@@ -206,3 +224,31 @@ to whole-log scanning would retain its false positives; falling back to
 `process_error` could retry an unrecognized quota stop. Current evidence does
 not settle that tradeoff. Existing recorded outcomes also replay as recorded;
 a new classifier would not automatically reinterpret them.
+
+## Antigravity CLI Flash probe, 2026-11-19
+
+The operator approved bounded real probes with a fast Flash model using the
+existing `agy` login. Antigravity CLI `1.5.12` passed the smoke probe:
+
+```sh
+uv run python examples/smoke_harness.py agy /tmp/workjig-agy-smoke-20261119-01
+```
+
+The command ran `agy --output-format stream-json --model gemini-3.8-flash-low
+--disable-slash-commands --sandbox -p <prompt-pointer>` with one launch, a
+180-second timeout, and no retries, authorized outside the parent tool sandbox
+using the existing login.
+
+The process ran from `08:54:16` to `08:54:36` UTC and exited **0**. It read
+`source.txt`, wrote an exact copy (`headless-probe-7391\n`) to `answer.txt`,
+and returned `delivered`. The repeated call reused the same launch without
+another model invocation.
+
+- Records: `/tmp/workjig-agy-smoke-20261119-01/records`.
+- Launch: `acb155dda0c246189b70d7fcaea23c72`.
+- Session: `a780dc08-2c6e-4eef-bc45-2dd4c10c70b0`.
+- Parsed stream: 27 records, zero parse errors, `result_status: SUCCESS`,
+  `permission_mode: request-review`, `reported_model: gemini-3.8-flash-low`
+  (from `init.model`; not an independent served-model claim).
+
+No real quota exhaustion or authentication failure was induced in this probe.

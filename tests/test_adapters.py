@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from workjig.adapters import (
+    agy_worker,
     claude_worker,
     codex_worker,
     parse_evidence,
@@ -78,6 +79,33 @@ def test_pi_command_requires_provider_tools_and_trust_choice():
 
 
 @pytest.mark.unit
+def test_agy_command_uses_stream_json_sandbox_and_omits_permission_bypass():
+    command = _render(agy_worker("gemini-3.8-flash-low"))
+    assert command[0] == "agy"
+    assert command[command.index("--output-format") + 1] == "stream-json"
+    assert command[command.index("--model") + 1] == "gemini-3.8-flash-low"
+    assert "--disable-slash-commands" in command
+    assert "--sandbox" in command
+    assert "--mode" not in command
+    assert "--effort" not in command
+    assert "--dangerously-skip-permissions" not in command
+    assert command[-2] == "-p"
+    assert str(Path("launch-1") / "prompt.txt") in command[-1]
+
+
+@pytest.mark.unit
+def test_agy_command_accepts_explicit_mode_effort_and_sandbox_toggle():
+    command = _render(
+        agy_worker("gemini-4-neon-high", mode="accept-edits", sandbox=False, effort="high")
+    )
+    assert command[command.index("--mode") + 1] == "accept-edits"
+    assert command[command.index("--effort") + 1] == "high"
+    assert "--sandbox" not in command
+    assert "--dangerously-skip-permissions" not in command
+    assert command[-2] == "-p"
+
+
+@pytest.mark.unit
 def test_command_rendering_keeps_literal_braces_while_replacing_path_tokens():
     command = _render(CommandWorker(argv=("worker", '{"literal": 1}', "{prompt}")))
     assert command == ("worker", '{"literal": 1}', str(Path("launch-1") / "prompt.txt"))
@@ -92,6 +120,11 @@ def test_command_rendering_keeps_literal_braces_while_replacing_path_tokens():
         lambda: claude_worker("m", allowed_tools=()),
         lambda: claude_worker("m", allowed_tools=("Read,Bash",)),
         lambda: pi_worker("m", provider="p", tools=("read",), project_trust="unknown"),
+        lambda: agy_worker(""),
+        lambda: agy_worker("{prompt}"),
+        lambda: agy_worker("m", mode="unknown"),
+        lambda: agy_worker("m", sandbox="true"),
+        lambda: agy_worker("m", effort="extreme"),
     ],
 )
 @pytest.mark.unit
@@ -201,3 +234,73 @@ def test_jsonl_parser_does_not_split_unicode_line_separator_inside_text():
     assert evidence["records"] == 1
     assert evidence["parse_errors"] == 0
     assert evidence["reported_model"] == "m\u2028v"
+
+
+@pytest.mark.unit
+def test_agy_evidence_keeps_session_model_status_and_usage_without_served_guess():
+    usage = {"input_tokens": 100, "output_tokens": 20, "total_tokens": 120}
+    evidence = parse_evidence(
+        "agy",
+        _jsonl(
+            {
+                "event": "init",
+                "conversation_id": "conv-1",
+                "init": {"model": "gemini-3.8-flash-low", "permission_mode": "request-review"},
+            },
+            {
+                "event": "result",
+                "result": {
+                    "conversation_id": "conv-1",
+                    "status": "SUCCESS",
+                    "response": "Done.",
+                    "usage": usage,
+                },
+            },
+        ),
+    )
+    assert evidence["session_id"] == "conv-1"
+    assert evidence["reported_model"] == "gemini-3.8-flash-low"
+    assert evidence["permission_mode"] == "request-review"
+    assert evidence["result_status"] == "SUCCESS"
+    assert evidence["usage"] == usage
+    assert "served_model" not in evidence
+    assert "error_message" not in evidence
+    assert "denied_actions" not in evidence
+
+
+@pytest.mark.unit
+def test_agy_evidence_records_errors_and_denied_actions_without_empty_session():
+    error_evidence = parse_evidence(
+        "agy",
+        _jsonl(
+            {
+                "event": "result",
+                "result": {
+                    "conversation_id": "",
+                    "status": "ERROR",
+                    "error": "invalid model selection",
+                    "finished_reason": "error",
+                },
+            }
+        ),
+    )
+    assert "session_id" not in error_evidence
+    assert error_evidence["result_status"] == "ERROR"
+    assert error_evidence["finished_reason"] == "error"
+    assert error_evidence["error_message"] == "invalid model selection"
+
+    denied_evidence = parse_evidence(
+        "agy",
+        _jsonl(
+            {
+                "event": "result",
+                "result": {
+                    "conversation_id": "conv-2",
+                    "status": "SUCCESS",
+                    "denied_actions": [{"action": "command", "display_name": "Bash"}],
+                },
+            }
+        ),
+    )
+    assert denied_evidence["session_id"] == "conv-2"
+    assert denied_evidence["denied_actions"] == [{"action": "command", "display_name": "Bash"}]

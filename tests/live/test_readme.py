@@ -14,7 +14,7 @@ pytestmark = [pytest.mark.subprocess, pytest.mark.live]
 ROOT = Path(__file__).resolve().parents[2]
 
 
-@pytest.mark.parametrize("harness", ["claude", "codex", "pi"])
+@pytest.mark.parametrize("harness", ["claude", "codex", "pi", "agy"])
 def test_readme_harness(harness, tmp_path, monkeypatch):
     assert shutil.which(harness), f"Install and authenticate {harness}; its CLI must be on PATH"
     monkeypatch.chdir(tmp_path)

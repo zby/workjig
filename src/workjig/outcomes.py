@@ -30,7 +30,7 @@ def _reject_constant(value: str) -> None:
     raise ValueError(f"invalid JSON constant: {value}")
 
 
-def _records(path: Path) -> Iterator[dict[str, object]]:
+def _records(path: Path, key: str = "type") -> Iterator[dict[str, object]]:
     if path.is_symlink() or not path.is_file():
         raise ValueError("harness log is not a regular file")
     # JSONL is LF-delimited; Unicode paragraph separators are valid string data.
@@ -39,7 +39,7 @@ def _records(path: Path) -> Iterator[dict[str, object]]:
             if not line.strip():
                 continue
             value = json.loads(line, parse_constant=_reject_constant)
-            if not isinstance(value, dict) or not isinstance(value.get("type"), str):
+            if not isinstance(value, dict) or not isinstance(value.get(key), str):
                 raise ValueError("invalid harness event")
             yield value
 
@@ -50,13 +50,14 @@ def terminal_failure(protocol: str, stdout: Path) -> str | None:
     Missing or malformed completion evidence is process_error. The caller still
     checks process exit, cleanup, worker problems and delivered files.
     """
-    parser = {
-        "codex-json": _codex,
-        "claude-stream-json": _claude,
-        "pi-json": _pi,
+    parser, key = {
+        "codex-json": (_codex, "type"),
+        "claude-stream-json": (_claude, "type"),
+        "pi-json": (_pi, "type"),
+        "agy-stream-json": (_agy, "event"),
     }[protocol]
     try:
-        return parser(_records(stdout))
+        return parser(_records(stdout, key))
     except (OSError, UnicodeError, ValueError, RecursionError):
         return "process_error"
 
@@ -133,3 +134,26 @@ def _pi(records: Iterator[dict[str, object]]) -> str | None:
     if message.get("stopReason") == "error":
         return _failure(message.get("errorMessage"))
     return "process_error"
+
+
+def _agy(records: Iterator[dict[str, object]]) -> str | None:
+    outcome: str | None = "process_error"
+    for record in records:
+        event = record["event"]
+        if event in {"init", "step_update"}:
+            outcome = "process_error"
+        elif event == "result":
+            payload = record.get("result")
+            if not isinstance(payload, dict):
+                outcome = "process_error"
+                continue
+            status = payload.get("status")
+            finished_reason = payload.get("finished_reason")
+            error = payload.get("error")
+            if status == "SUCCESS" and finished_reason in (None, "") and error in (None, ""):
+                outcome = None
+            elif status == "ERROR":
+                outcome = _failure(error)
+            else:
+                outcome = "process_error"
+    return outcome

@@ -150,6 +150,10 @@ class RetryPolicy:
         object.__setattr__(self, "backoff_seconds", float(self.backoff_seconds))
 
 
+_OUTPUT_PROTOCOLS = frozenset({"codex-json", "claude-stream-json", "pi-json", "agy-stream-json"})
+_TRACKABLE_PROTOCOLS = frozenset({"codex-json", "claude-stream-json", "pi-json"})
+
+
 @dataclass(frozen=True)
 class CommandWorker:
     """A command template with path placeholders substituted per launch.
@@ -164,7 +168,9 @@ class CommandWorker:
     name: str = "command"
     env: Mapping[str, str] = field(default_factory=dict)
     evidence_file: str | None = None
-    output_protocol: Literal["codex-json", "claude-stream-json", "pi-json"] | None = None
+    output_protocol: (
+        Literal["codex-json", "claude-stream-json", "pi-json", "agy-stream-json"] | None
+    ) = None
 
     track_native_session: bool = False
 
@@ -186,13 +192,15 @@ class CommandWorker:
                 raise ValueError("unsafe evidence file name")
         if self.output_protocol is not None and (
             not isinstance(self.output_protocol, str)
-            or self.output_protocol not in {"codex-json", "claude-stream-json", "pi-json"}
+            or self.output_protocol not in _OUTPUT_PROTOCOLS
         ):
             raise ValueError("unsupported output protocol")
         if type(self.track_native_session) is not bool or (
             self.track_native_session and self.output_protocol is None
         ):
             raise ValueError("native session tracking requires an explicit harness protocol")
+        if self.track_native_session and self.output_protocol not in _TRACKABLE_PROTOCOLS:
+            raise ValueError("native session tracking is not supported for this output protocol")
         if (
             self.track_native_session
             and (self.evidence_file or "").rstrip(".").casefold() == "native-session.json"

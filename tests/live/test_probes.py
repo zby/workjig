@@ -12,7 +12,7 @@ pytestmark = [pytest.mark.subprocess, pytest.mark.live]
 EXAMPLE = Path(__file__).resolve().parents[2] / "examples" / "smoke_harness.py"
 
 
-@pytest.mark.parametrize("harness", ["claude", "codex", "pi"])
+@pytest.mark.parametrize("harness", ["claude", "codex", "pi", "agy"])
 def test_real_probe(harness, tmp_path, monkeypatch, capsys):
     assert shutil.which(harness), f"Install and authenticate {harness}; its CLI must be on PATH"
     monkeypatch.setattr(sys, "argv", [str(EXAMPLE), harness, str(tmp_path)])

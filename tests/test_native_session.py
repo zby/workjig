@@ -230,3 +230,13 @@ def test_receipt_filename_reserved_case_insensitively(name):
 def test_generic_command_cannot_enable_tracking_without_protocol():
     with pytest.raises(ValueError, match="protocol"):
         CommandWorker(argv=("some-command",), track_native_session=True)
+
+
+@pytest.mark.unit
+def test_agy_protocol_rejects_native_session_tracking():
+    with pytest.raises(ValueError, match="protocol"):
+        CommandWorker(
+            argv=("agy", "--output-format", "stream-json", "-p", "{prompt}"),
+            output_protocol="agy-stream-json",
+            track_native_session=True,
+        )

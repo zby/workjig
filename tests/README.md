@@ -6,7 +6,7 @@
 |---|---|---|
 | `tests/test_*.py` | Runtime unit, file-based and deterministic subprocess tests | Included |
 | `tests/examples/` | Example snippets and commands with deterministic executable substitutes | Included |
-| `tests/live/` | Examples against installed, authenticated Claude, Codex and Pi CLIs | Excluded; explicit opt-in |
+| `tests/live/` | Examples against installed, authenticated Claude, Codex, Pi and Antigravity (`agy`) CLIs | Excluded; explicit opt-in |
 
 The normal suite is deterministic and credential-free. It needs Python and the
 locked development dependencies, not installed coding harnesses or model access.
@@ -49,7 +49,7 @@ This is collection separation, not a suite of automatically skipped tests.
 | `examples/test_examples.py` | README snippets, every example's help entry point, and single/all probe commands with substitutes | Mixed |
 | `examples/test_simulated_harness.py` | Script-backed example delivery, effects, synthetic logs, replay and worker problems | Subprocess |
 | `examples/test_smoke.py` | Manual probe-command argument validation; launches no harness | Unit |
-| `live/test_readme.py` | README Claude example and Codex/Pi alternatives: delivery and reuse | Live subprocess |
+| `live/test_readme.py` | README Claude example and Codex/Pi/Antigravity alternatives: delivery and reuse | Live subprocess |
 | `live/test_probes.py` | Real single-harness probe commands: exact file copy and reuse | Live subprocess |
 
 `unit` includes temporary-file tests, not just pure in-memory functions.
@@ -85,7 +85,7 @@ Inspect collection without calling a harness:
 uv run pytest tests/live --live-smoke --collect-only -q
 ```
 
-To deliberately run all six live cases, choose a **fresh private artifact path**:
+To deliberately run all eight live cases, choose a **fresh private artifact path**:
 
 ```sh
 uv run pytest tests/live --live-smoke -v --basetemp=/tmp/my-workjig-live-run
@@ -98,8 +98,8 @@ files and raw logs remain beneath that directory after the run. Without
 contain sensitive data; inspect before sharing.
 
 Each test permits at most one physical launch with a 180-second timeout and
-checks reuse without an additional launch. The full suite permits up to six
-launches (three README calls and three probe calls), with up to 18 minutes of
+checks reuse without an additional launch. The full suite permits up to eight
+launches (four README calls and four probe calls), with up to 24 minutes of
 worker wait time plus setup/cleanup overhead. It has no automatic retries.
 README cases check delivery of a nonempty summary, not its semantic quality;
 probe cases check an exact file copy. The single/all command dispatch is also

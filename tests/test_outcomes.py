@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from workjig import CommandWorker, RecordError, Request, RetryPolicy, Run
-from workjig.adapters import claude_worker, codex_worker, pi_worker
+from workjig.adapters import agy_worker, claude_worker, codex_worker, pi_worker
 from workjig.outcomes import terminal_failure
 
 CAPTURES = Path(__file__).resolve().parents[1] / "adr/evidence/terminal-failures/captures"
@@ -160,6 +160,37 @@ PI_ERROR = {
 }
 PI_STOP = {"type": "message_end", "message": {"role": "assistant", "stopReason": "stop"}}
 SETTLED = {"type": "agent_settled", "aborted": False}
+AGY_INIT = {
+    "event": "init",
+    "conversation_id": "conv-1",
+    "init": {"model": "gemini-3.8-flash-low", "permission_mode": "request-review"},
+}
+AGY_SUCCESS = {
+    "event": "result",
+    "result": {
+        "conversation_id": "conv-1",
+        "status": "SUCCESS",
+        "response": "Quoted usage limit\u2028is ordinary text",
+    },
+}
+AGY_QUOTA = {
+    "event": "result",
+    "result": {
+        "conversation_id": "conv-1",
+        "status": "ERROR",
+        "error": "HTTP 429: quota exceeded",
+        "finished_reason": "error",
+    },
+}
+AGY_ERROR = {
+    "event": "result",
+    "result": {
+        "conversation_id": "",
+        "status": "ERROR",
+        "error": "invalid model selection",
+        "finished_reason": "error",
+    },
+}
 
 
 @pytest.mark.parametrize(
@@ -251,6 +282,51 @@ SETTLED = {"type": "agent_settled", "aborted": False}
             "delivered",
         ),
         ("pi-json", [PI_STOP, SETTLED, {"type": "agent_start"}], "process_error"),
+        (
+            "agy-stream-json",
+            [
+                AGY_INIT,
+                {
+                    "event": "step_update",
+                    "step_update": {
+                        "step_type": "tool",
+                        "tool_info": {"output": "Quoted usage limit"},
+                    },
+                },
+                AGY_SUCCESS,
+            ],
+            "delivered",
+        ),
+        ("agy-stream-json", [AGY_INIT, AGY_QUOTA], "usage_limit"),
+        ("agy-stream-json", [AGY_ERROR], "process_error"),
+        (
+            "agy-stream-json",
+            [{"event": "result", "result": {"status": "ERROR", "error": []}}],
+            "process_error",
+        ),
+        (
+            "agy-stream-json",
+            [
+                {
+                    "event": "result",
+                    "result": {"status": "SUCCESS", "finished_reason": "print_timeout"},
+                }
+            ],
+            "process_error",
+        ),
+        (
+            "agy-stream-json",
+            [{"event": "result", "result": {"status": "SUCCESS", "error": "unexpected"}}],
+            "process_error",
+        ),
+        ("agy-stream-json", [{"event": "result", "result": []}], "process_error"),
+        ("agy-stream-json", [AGY_INIT], "process_error"),
+        (
+            "agy-stream-json",
+            [AGY_SUCCESS, {"event": "step_update", "step_update": {"step_index": 2}}],
+            "process_error",
+        ),
+        ("agy-stream-json", [AGY_QUOTA, AGY_SUCCESS], "delivered"),
     ],
 )
 @pytest.mark.unit
@@ -285,6 +361,37 @@ def test_invalid_json_constant_cannot_establish_completion(tmp_path):
 def test_malformed_line_cannot_adopt_quota_event(tmp_path):
     stream = (CAPTURES / "codex-quota" / "stdout.jsonl").read_text()
     assert classify(tmp_path, "codex-json", stream + "broken\n") == "process_error"
+
+
+@pytest.mark.unit
+def test_agy_rejects_missing_event_discriminator_and_trailing_corruption(tmp_path):
+    assert classify(tmp_path, "agy-stream-json", jsonl({"type": "result"})) == "process_error"
+    assert classify(tmp_path, "agy-stream-json", jsonl(AGY_QUOTA) + "broken\n") == "process_error"
+
+
+@pytest.mark.parametrize(
+    "records,code,expected,launches",
+    [
+        ([AGY_INIT, AGY_SUCCESS], 0, "delivered", 1),
+        ([AGY_INIT, AGY_QUOTA], 1, "usage_limit", 1),
+        ([AGY_ERROR], 1, "process_error", 2),
+    ],
+)
+@pytest.mark.subprocess
+def test_agy_adapter_outcomes_retry_and_replay(tmp_path, records, code, expected, launches):
+    req = request("agy-stream-json", jsonl(*records), code=code)
+    worker = replace(agy_worker("fixture"), argv=req.worker.argv, name="renamed-display")
+    req = replace(req, worker=worker, retry=RetryPolicy(on=("process_error",)))
+    result = check(tmp_path, req, expected)
+    assert len(result.launches) == launches
+    assert result.failed_at_launch_limit == (expected == "process_error")
+    with Run(tmp_path / "records", tmp_path) as run:
+        replay = run.call(req)
+    assert replay.reused
+    assert replay.launches == result.launches
+    assert replay.status == result.status
+    assert dict(replay.outputs) == dict(result.outputs)
+    assert (tmp_path / "starts").read_text().splitlines() == ["start"] * launches
 
 
 @pytest.mark.parametrize("behavior,expected", [("timeout", "timeout"), ("linger", "usage_limit")])

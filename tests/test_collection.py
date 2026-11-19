@@ -41,7 +41,8 @@ def test_live_optin_collects_without_credentials():
     completed = collect("tests/live", "--live-smoke")
     assert completed.returncode == 0, completed.stdout + completed.stderr
     nodes = [line for line in completed.stdout.splitlines() if line.startswith("tests/live/")]
-    assert len(nodes) == 6
+    assert len(nodes) == 8
     assert all(
-        any(f"[{harness}]" in node for harness in ("claude", "codex", "pi")) for node in nodes
+        any(f"[{harness}]" in node for harness in ("claude", "codex", "pi", "agy"))
+        for node in nodes
     )

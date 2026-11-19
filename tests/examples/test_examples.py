@@ -31,6 +31,8 @@ if harness == "codex":
     assert Path(args[args.index("-C") + 1]) == Path.cwd()
 elif harness == "claude":
     assert "-p" in args and args[args.index("--output-format") + 1] == "stream-json"
+elif harness == "agy":
+    assert args[args.index("--output-format") + 1] == "stream-json" and args[-2] == "-p"
 else:
     assert harness == "pi" and args[args.index("--mode") + 1] == "json"
 assert args[-1].startswith("Read the complete task and file paths in `")
@@ -47,6 +49,11 @@ if harness == "codex":
     events = [{"type": "turn.completed"}]
 elif harness == "claude":
     events = [{"type": "result", "subtype": "success", "is_error": False}]
+elif harness == "agy":
+    events = [
+        {"event": "init", "conversation_id": "conv-1", "init": {"model": "fixture"}},
+        {"event": "result", "result": {"conversation_id": "conv-1", "status": "SUCCESS"}},
+    ]
 else:
     events = [
         {"type": "message_end", "message": {"role": "assistant", "stopReason": "stop"}},
@@ -75,7 +82,7 @@ def substitute_harnesses(tmp_path, monkeypatch):
 
         return build
 
-    for harness in ("claude", "codex", "pi"):
+    for harness in ("claude", "codex", "pi", "agy"):
         name = f"{harness}_worker"
         monkeypatch.setattr(adapters, name, substitute(harness, getattr(adapters, name)))
     return constructed
@@ -107,8 +114,8 @@ def test_readme_python_examples(tmp_path, monkeypatch, capsys, substitute_harnes
     assert capsys.readouterr().out == "Material to summarize.\n"
 
     exec(compile(blocks[1], "README.md:alternatives", "exec"), namespace)
-    assert [worker.name for worker in substitute_harnesses] == ["claude", "codex", "pi"]
-    # Both alternatives must execute, not just construct successfully. The
+    assert [worker.name for worker in substitute_harnesses] == ["claude", "codex", "pi", "agy"]
+    # All alternatives must execute, not just construct successfully. The
     # allowlists, prompt pointers and protocols remain those of the real factories.
     for worker in substitute_harnesses[1:]:
         request = replace(namespace["request"], worker=worker)
@@ -119,7 +126,7 @@ def test_readme_python_examples(tmp_path, monkeypatch, capsys, substitute_harnes
 
 
 @pytest.mark.subprocess
-@pytest.mark.parametrize("harness", ["all", "claude", "codex", "pi"])
+@pytest.mark.parametrize("harness", ["all", "claude", "codex", "pi", "agy"])
 def test_smoke_probe_example_with_substitutes(
     tmp_path, monkeypatch, capsys, substitute_harnesses, harness
 ):
@@ -130,7 +137,7 @@ def test_smoke_probe_example_with_substitutes(
     monkeypatch.setattr(sys, "argv", argv)
     runpy.run_path(str(EXAMPLES / "smoke_harness.py"), run_name="__main__")
     reports = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
-    expected = ["codex", "claude", "pi"] if harness == "all" else [harness]
+    expected = ["codex", "claude", "pi", "agy"] if harness == "all" else [harness]
     assert [report["harness"] for report in reports] == expected
     assert len(substitute_harnesses) == len(expected)
     for report in reports:

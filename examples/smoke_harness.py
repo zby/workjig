@@ -7,9 +7,14 @@ import json
 from pathlib import Path
 
 from workjig import Request, Run
-from workjig.adapters import claude_worker, codex_worker, parse_evidence, pi_worker
+from workjig.adapters import agy_worker, claude_worker, codex_worker, parse_evidence, pi_worker
 
-DEFAULT_MODELS = {"codex": "gpt-6-luna", "claude": "haiku", "pi": "luna"}
+DEFAULT_MODELS = {
+    "codex": "gpt-6-luna",
+    "claude": "haiku",
+    "pi": "luna",
+    "agy": "gemini-3.8-flash-low",
+}
 
 
 def probe(harness: str, workdir: Path, model: str) -> dict[str, object]:
@@ -18,6 +23,8 @@ def probe(harness: str, workdir: Path, model: str) -> dict[str, object]:
         worker = codex_worker(model, sandbox="workspace-write", effort="low")
     elif harness == "claude":
         worker = claude_worker(model, allowed_tools=("Read", "Write"))
+    elif harness == "agy":
+        worker = agy_worker(model)
     else:
         worker = pi_worker(
             model,
@@ -73,7 +80,10 @@ def main() -> None:
     parser.add_argument("workdir", type=Path)
     parser.add_argument(
         "--model",
-        help="override a single harness's default (codex: gpt-6-luna; claude: haiku; pi: luna)",
+        help=(
+            "override a single harness's default "
+            "(codex: gpt-6-luna; claude: haiku; pi: luna; agy: gemini-3.8-flash-low)"
+        ),
     )
     args = parser.parse_args()
     if args.harness == "all" and args.model is not None:

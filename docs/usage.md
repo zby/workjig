@@ -107,7 +107,7 @@ threads or parallel groups remain responsible for their combined concurrency.
 ## Harness adapters
 
 ```python
-from workjig.adapters import codex_worker, pi_worker
+from workjig.adapters import agy_worker, codex_worker, pi_worker
 
 codex = codex_worker("gpt-6.1-sol", sandbox="workspace-write", effort="low")
 pi = pi_worker(
@@ -116,6 +116,7 @@ pi = pi_worker(
     tools=("read", "write"),
     project_trust="no-approve",
 )
+agy = agy_worker("gemini-3.8-flash-low")
 ```
 
 Pass one of these as the request's `worker`. Put the run records inside a
@@ -123,9 +124,14 @@ directory the worker can write; the adapter does not widen the sandbox for
 record paths. Pi's project-trust option controls resource loading, not OS
 permissions. A `claude_worker` command factory is also available; Claude Code
 2.1.303 passed the bounded file-copy and reuse probe with requested model
-`haiku`, reporting `claude-haiku-5-5` (see the harness evidence).
+`haiku`, reporting `claude-haiku-5-5` (see the harness evidence). `agy_worker`
+configures Antigravity CLI (`agy`) 1.5.12 with `--output-format stream-json`,
+`--disable-slash-commands`, optional `--mode` (`accept-edits`, `auto`, `plan`),
+optional `--effort`, and `--sandbox` enabled by default (`sandbox=True`),
+without `--dangerously-skip-permissions`.
 
-Codex and Pi have each passed a bounded real file-copy probe and reuse check.
+Codex, Pi, Claude and Antigravity CLI (`agy`) have each passed a bounded real
+file-copy probe and reuse check.
 Their raw event streams remain in each launch's `stdout.log`. The standalone
 `parse_evidence(harness, stdout_text)` helper extracts available session and
 model fields; it does not infer the served model from the requested model.
@@ -135,7 +141,8 @@ For Claude result records, it preserves the reported `modelUsage` mapping as
 automatic interpretation of those CLI streams.
 
 The factories set `CommandWorker.output_protocol` to `codex-json`,
-`claude-stream-json`, or `pi-json` for terminal-outcome classification. A generic
+`claude-stream-json`, `pi-json`, or `agy-stream-json` for terminal-outcome
+classification. A generic
 `CommandWorker` defaults to `None` (exit status and the file protocol only);
 its display `name` never selects a parser. Protocol selection is part of request
 identity, so adding it to an existing request creates a different identity,
@@ -272,7 +279,8 @@ when no controller is working.
 ### Locate a native session
 
 Pass `track_native_session=True` to `pi_worker`, `claude_worker`, or
-`codex_worker` (default: false). A custom `CommandWorker` can set the same
+`codex_worker` (default: false). Native session tracking is not currently
+supported for `agy-stream-json`. A custom `CommandWorker` can set the same
 flag and matching `output_protocol` when it runs that native CLI with the
 same invocation shape: Pi and Claude take the prompt last; Codex runs its
 own executable in JSON exec mode. Do not supply competing session selection
@@ -338,19 +346,20 @@ model invocations.
 ## Examples and real-harness probes
 
 The [ordinary-file example](../examples/README.md) demonstrates checks, corrections
-and resume. To run all three real, credential-using probes deliberately:
+and resume. To run all four real, credential-using probes deliberately:
 
 ```sh
 uv run python examples/smoke_harness.py all /tmp/my-harness-probes
 ```
 
-Defaults: Codex **gpt-6-luna**, Claude **haiku**, Pi **luna** (provider `openai`).
+Defaults: Codex **gpt-6-luna**, Claude **haiku**, Pi **luna** (provider `openai`),
+Antigravity CLI **gemini-3.8-flash-low**.
 Install and authenticate each CLI first; models must be available through your
 configured account. These are requested model names, not verified served-model
-identities. The command runs sequentially, with separate `codex`, `claude` and
-`pi` subdirectories. Each probe allows one launch with a 180-second timeout,
+identities. The command runs sequentially, with separate `codex`, `claude`, `pi`
+and `agy` subdirectories. Each probe allows one launch with a 180-second timeout,
 checks an exact file copy and verifies cached reuse. It prints one JSON report
-per harness, attempts all three even after a probe fails, and exits nonzero if
+per harness, attempts all four even after a probe fails, and exits nonzero if
 any probe fails. Keyboard interruption still stops the command.
 
 Use a fresh root directory for a fresh set of model calls. Repeating a successful
@@ -366,6 +375,7 @@ To run just one harness, or override its model:
 uv run python examples/smoke_harness.py codex /tmp/my-codex-probe
 uv run python examples/smoke_harness.py pi /tmp/my-pi-probe
 uv run python examples/smoke_harness.py claude /tmp/my-claude-probe --model haiku
+uv run python examples/smoke_harness.py agy /tmp/my-agy-probe --model gemini-3.8-flash-low
 ```
 
 `--model` applies only to single-harness commands, not `all`.
