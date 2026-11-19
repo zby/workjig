@@ -29,7 +29,7 @@ def prepare(
     input_dir.mkdir()
     output_dir.mkdir()
     for name, content in request.inputs.items():
-        (input_dir / name).write_text(content, encoding="utf-8")
+        (input_dir / name).write_bytes(content.encode("utf-8"))
     prompt = files.prompt
     lines = ["Task:", request.task, "", "Inputs (read these exact files):"]
     lines.extend(f"- {name}: {input_dir / name}" for name in sorted(request.inputs))
@@ -196,7 +196,7 @@ def launch(
                     missing.append(name)
                 continue
             try:
-                outputs[name] = path.read_text(encoding="utf-8")
+                outputs[name] = path.read_bytes().decode("utf-8")
             except (OSError, UnicodeError):
                 status = LaunchStatus.PROTOCOL_ERROR
                 break

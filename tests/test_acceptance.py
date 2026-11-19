@@ -147,6 +147,28 @@ def test_same_material_different_call_ids_launch_independently(
 
 
 @pytest.mark.subprocess
+def test_utf8_payload_survives_launch_and_replay(tmp_path: Path) -> None:
+    worker = CommandWorker(
+        argv=(
+            sys.executable,
+            "-c",
+            "import shutil, sys; shutil.copyfile(sys.argv[1], sys.argv[2])",
+            "{input_dir}/value.txt",
+            "{output_dir}/result.txt",
+        ),
+    )
+    value = "café\r\n二\rthree\nfour"
+    req = request("copy", worker, value=value)
+    records = tmp_path / "records"
+    with Run(records, tmp_path) as run:
+        delivered = run.call(req)
+    assert delivered.outputs["result.txt"] == value
+    with Run(records, tmp_path) as run:
+        replay = run.call(req)
+    assert replay.reused and replay.outputs == delivered.outputs
+
+
+@pytest.mark.subprocess
 def test_changed_declared_inputs_miss_reuse(command_script: Path, tmp_path: Path) -> None:
     log = tmp_path / "events.jsonl"
     worker = command(command_script, log)

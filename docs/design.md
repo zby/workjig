@@ -44,7 +44,11 @@ prompts have different identities. Changes to supplied content must not reuse
 the earlier result.
 
 Every physical launch receives a fresh directory and its own prompt, inputs
-and output paths. Files left by a failed launch are evidence of that launch;
+and output paths. Named inputs are written as UTF-8 and delivered outputs
+are decoded as UTF-8, without translating line endings in either direction.
+Encoding a newly collected output as UTF-8 reproduces the bytes collected,
+not necessarily the current contents of its launch file.
+Files left by a failed launch are evidence of that launch;
 they cannot become another launch's result. The runtime records returned
 content with the invocation that produced it. Model or session identity that
 the harness does not establish remains unknown.

@@ -4,6 +4,13 @@ Workjig is in early development: releases may change the public API and the
 persisted run-record format without migration. Each entry states what changed
 so callers can update and decide whether existing run directories remain usable.
 
+## Unreleased
+
+- Named input and output strings now preserve UTF-8 file line endings on new
+  launches. Replay returns the string originally committed; it cannot recover
+  line endings normalized by an older runtime. Use a fresh run when exact
+  bytes matter. The record format is unchanged.
+
 ## 0.4.1 - 2026-11-16
 
 Two fixes found in review before 0.4.0 was uploaded; 0.4.0 was tagged but not
