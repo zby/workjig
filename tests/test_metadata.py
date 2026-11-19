@@ -7,36 +7,55 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.subprocess
+from workjig.harness import _read_evidence, _read_problem
+
 fifo_only = pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFOs are POSIX-only")
 
 
+@pytest.mark.unit
+@pytest.mark.parametrize("kind", ["[]", "{}"])
+def test_bad_problem_kind_is_invalid(tmp_path, kind):
+    path = tmp_path / "problem.json"
+    path.write_text('{"kind":' + kind + ',"message":"oops"}')
+    assert _read_problem(path) == (None, True)
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
-    ("problem", "evidence", "outcome", "expected"),
+    "raw", ['{"nested":[NaN]}', '{"x":Infinity}', '{"x":-Infinity}', '{"x":1e400}']
+)
+def test_nonfinite_evidence_is_discarded(tmp_path, raw):
+    path = tmp_path / "evidence.json"
+    path.write_text(raw)
+    assert _read_evidence(path) is None
+
+
+@pytest.mark.unit
+def test_deep_metadata_does_not_escape_parser(tmp_path):
+    path = tmp_path / "deep.json"
+    path.write_text("[" * 200_000)
+    assert _read_problem(path) == (None, True)
+    assert _read_evidence(path) is None
+
+
+# Exercise collection, precedence, allowance and replay together for distinct
+# outcomes, not for every parser input at both ceilings. Keep the enclosing
+# controller timeout: accepting a FIFO as a regular file could block forever.
+@pytest.mark.subprocess
+@pytest.mark.parametrize(
+    ("problem", "evidence", "outcome", "expected", "max_launches"),
     [
-        ('{"kind":[],"message":"oops"}', "{}", "exit", "protocol_error"),
-        ('{"kind":{},"message":"oops"}', "{}", "exit", "protocol_error"),
-        ('{"kind":[],"message":"oops"}', "{}", "timeout", "timeout"),
-        ('{"kind":[],"message":"oops"}', "{}", "log_limit", "protocol_error"),
-        ('{"kind":"usage_limit","message":"quota"}', '{"x":NaN}', "exit", "usage_limit"),
-        ('{"kind":"usage_limit","message":"quota"}', '{"x":Infinity}', "timeout", "timeout"),
-        ("absent", '{"nested":[NaN]}', "exit", "delivered"),
-        ("absent", '{"x":Infinity}', "exit", "delivered"),
-        ("absent", '{"x":-Infinity}', "exit", "delivered"),
-        ("absent", '{"x":1e400}', "exit", "delivered"),
-        ("absent", '{"x":1e400}', "timeout", "timeout"),
-        ("absent", '{"x":1e400}', "log_limit", "process_error"),
-        ("deep", "{}", "exit", "protocol_error"),
-        ("absent", "deep", "exit", "delivered"),
-        ("deep", "deep", "timeout", "timeout"),
-        pytest.param("fifo", "{}", "exit", "protocol_error", marks=fifo_only),
-        pytest.param("absent", "fifo", "exit", "delivered", marks=fifo_only),
-        pytest.param("fifo", "fifo", "timeout", "timeout", marks=fifo_only),
-        pytest.param("fifo", "fifo", "log_limit", "protocol_error", marks=fifo_only),
-        pytest.param("absent", "{}", "log_fifo", "process_error", marks=fifo_only),
+        ('{"kind":[],"message":"oops"}', "{}", "log_limit", "protocol_error", 1),
+        ('{"kind":"usage_limit","message":"quota"}', '{"x":NaN}', "exit", "usage_limit", 2),
+        ('{"kind":"usage_limit","message":"quota"}', "deep", "timeout", "timeout", 1),
+        ("absent", '{"x":1e400}', "log_limit", "process_error", 2),
+        ("absent", "deep", "exit", "delivered", 1),
+        pytest.param("fifo", "fifo", "exit", "protocol_error", 2, marks=fifo_only),
+        ("deep", "deep", "timeout", "timeout", 2),
+        pytest.param("absent", "fifo", "exit", "delivered", 2, marks=fifo_only),
+        pytest.param("absent", "{}", "log_fifo", "process_error", 1, marks=fifo_only),
     ],
 )
-@pytest.mark.parametrize("max_launches", [1, 2])
 def test_metadata_settles_and_reopens(
     tmp_path: Path, problem: str, evidence: str, outcome: str, expected: str, max_launches: int
 ) -> None:

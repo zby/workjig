@@ -236,30 +236,26 @@ def test_worker_argv_preserves_literal_braces(tmp_path: Path) -> None:
     assert command[3] == str(prompt)
 
 
-@pytest.mark.parametrize("stream", ["stdout", "stderr"])
-@pytest.mark.parametrize(
-    "message, exit_code, expected",
-    [
-        ("Usage limit reached", 1, "process_error"),
-        ("You've hit your usage limit", 7, "process_error"),
-        ("Provider: USAGE LIMIT exceeded", 2, "process_error"),
-        ("x" * 65532 + "Usage limit reached", 1, "process_error"),
-        ("Usage limit reached", 0, "delivered"),
-        ("Provider: rate limit exceeded", 1, "process_error"),
-    ],
-    ids=["claude", "codex", "provider", "chunk-boundary", "success", "other-error"],
-)
+@pytest.mark.parametrize("exit_code, expected", [(0, "delivered"), (7, "process_error")])
 @pytest.mark.subprocess
 def test_generic_log_text_does_not_classify_usage_limits(
-    tmp_path: Path, stream: str, message: str, exit_code: int, expected: str
+    tmp_path: Path, exit_code: int, expected: str
 ) -> None:
+    # Generic streams are opaque bytes. Exercise both channels and all the
+    # old phrase probes (including the chunk boundary) in the same launch.
+    payload = (
+        b"\xff" + b"x" * 65532 + b"Usage limit reached\nYou've hit your usage limit\n"
+        b"Provider: USAGE LIMIT exceeded\nProvider: rate limit exceeded"
+    )
     script = tmp_path / "worker.py"
     script.write_text(
         "import sys\n"
         "from pathlib import Path\n"
         "with Path('launches').open('a') as log: log.write('launch\\n')\n"
         "(Path(sys.argv[3]) / 'result.txt').write_text('candidate')\n"
-        f"sys.{stream}.buffer.write(b'\\xff' + {message.encode()!r})\n"
+        f"payload = {payload!r}\n"
+        "sys.stdout.buffer.write(payload + b'out')\n"
+        "sys.stderr.buffer.write(payload + b'err')\n"
         f"sys.exit({exit_code})\n"
     )
     request = _request(_worker(script), max_launches=2, retry=RetryPolicy(on=("process_error",)))
@@ -272,9 +268,9 @@ def test_generic_log_text_does_not_classify_usage_limits(
     assert result.outputs == ({"result.txt": "candidate"} if expected == "delivered" else {})
     for attempt in result.launches:
         assert attempt.returncode == exit_code
-        assert (Path(attempt.launch_dir) / f"{stream}.log").read_bytes() == (
-            b"\xff" + message.encode()
-        )
+        directory = Path(attempt.launch_dir)
+        assert (directory / "stdout.log").read_bytes() == payload + b"out"
+        assert (directory / "stderr.log").read_bytes() == payload + b"err"
     with Run(records, tmp_path) as run:
         resumed = run.call(request)
     assert resumed.status == expected

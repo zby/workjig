@@ -7,8 +7,24 @@ from pathlib import Path
 import pytest
 
 from workjig import CommandWorker, LaunchRecord, RecordError, Request, Run
+from workjig.records import launch_from_json, launch_to_json
 
-pytestmark = pytest.mark.subprocess
+
+@pytest.fixture
+def delivered_launch():
+    stamp = "2026-01-01T00:00:00+00:00"
+    return launch_to_json(
+        LaunchRecord(
+            "id",
+            "delivered",
+            "/launch",
+            ("worker",),
+            pid=1,
+            returncode=0,
+            started_at=stamp,
+            finished_at=stamp,
+        )
+    )
 
 
 @pytest.fixture
@@ -36,6 +52,7 @@ def completed_record(tmp_path: Path):
     return path, original, state, entry, request
 
 
+@pytest.mark.subprocess
 def test_launch_records_round_trip_current_storage_format(completed_record):
     path, original, state, entry, request = completed_record
     assert state["version"] == 3
@@ -93,9 +110,17 @@ def test_launch_records_round_trip_current_storage_format(completed_record):
         ("missing_outputs", ["answer.txt"]),
     ],
 )
-def test_corrupt_attempt_rejected_without_changing_record(completed_record, field, bad):
+@pytest.mark.unit
+def test_corrupt_attempt_field_rejected(delivered_launch, field, bad):
+    delivered_launch[field] = bad
+    with pytest.raises(RecordError):
+        launch_from_json(delivered_launch)
+
+
+@pytest.mark.subprocess
+def test_corrupt_attempt_rejected_without_changing_record(completed_record):
     path, original, state, entry, request = completed_record
-    entry["attempts"][0][field] = bad
+    entry["attempts"][0]["pid"] = "not-a-pid"
     damaged = json.dumps(state)
     path.write_text(damaged)
     with pytest.raises(RecordError):
@@ -111,18 +136,16 @@ def test_corrupt_attempt_rejected_without_changing_record(completed_record, fiel
 
 
 @pytest.mark.parametrize("damage", ["missing-field", "extra-field", "not-object"])
-def test_attempt_schema_is_checked(completed_record, damage):
-    path, _, state, entry, _ = completed_record
+@pytest.mark.unit
+def test_attempt_schema_is_checked(delivered_launch, damage):
     if damage == "missing-field":
-        del entry["attempts"][0]["pid"]
+        del delivered_launch["pid"]
     elif damage == "extra-field":
-        entry["attempts"][0]["unexpected"] = "value"
+        delivered_launch["unexpected"] = "value"
     else:
-        entry["attempts"][0] = []
-    path.write_text(json.dumps(state))
+        delivered_launch = []
     with pytest.raises(RecordError):
-        with Run(path.parent, path.parent.parent):
-            pytest.fail("corrupt record was opened")
+        launch_from_json(delivered_launch)
 
 
 @pytest.mark.parametrize(
@@ -133,17 +156,24 @@ def test_attempt_schema_is_checked(completed_record, damage):
         ("launch_error", {}),
         ("interrupted", {}),
         ("incomplete", {}),
-        ("incomplete", {"missing_outputs": ["undeclared.txt"]}),
         ("worker_problem", {}),
         ("timeout", {"problem": {"kind": "operator_acknowledgment", "message": "stopped"}}),
         ("process_error", {"problem": {"kind": "launch_error", "message": "failed"}}),
         ("timeout", {"missing_outputs": ["answer.txt"]}),
     ],
 )
-def test_inconsistent_lifecycle_record_is_rejected(completed_record, status, updates):
+@pytest.mark.unit
+def test_inconsistent_lifecycle_record_is_rejected(delivered_launch, status, updates):
+    delivered_launch.update(status=status, **updates)
+    with pytest.raises(RecordError):
+        launch_from_json(delivered_launch)
+
+
+@pytest.mark.subprocess
+def test_launch_cannot_name_undeclared_missing_output(completed_record):
     path, _, state, entry, _ = completed_record
     entry["result"] = None
-    entry["attempts"][0].update(status=status, **updates)
+    entry["attempts"][0].update(status="incomplete", missing_outputs=["undeclared.txt"])
     path.write_text(json.dumps(state))
     with pytest.raises(RecordError):
         with Run(path.parent, path.parent.parent):
@@ -163,6 +193,7 @@ def test_inconsistent_lifecycle_record_is_rejected(completed_record, status, upd
         ("launch_error", "pass"),
     ],
 )
+@pytest.mark.subprocess
 def test_emitted_terminal_records_reopen_without_another_launch(tmp_path: Path, status, body):
     script = tmp_path / "worker.py"
     evidence = {"model": "synthetic", "details": [None, True, 3, 0.5, {"items": []}]}

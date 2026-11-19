@@ -39,8 +39,8 @@ This is collection separation, not a suite of automatically skipped tests.
 | `test_outcomes.py` | Captured/synthetic stream classification; representative runtime outcome, retry and replay cases | Mixed |
 | `test_core.py` | Request validation, locks, durable accounting, process ownership and cleanup | Mixed |
 | `test_acceptance.py` | Public API and ordinary-file workflow, parallel settlement, corrections and recovery | Mixed |
-| `test_metadata.py` | Untrusted worker problem/evidence files, including FIFOs and timeouts | Subprocess |
-| `test_record_validation.py` | Corruption and lifecycle validation against records produced by deterministic workers | Subprocess |
+| `test_metadata.py` | Problem/evidence parsing, plus bounded worker probes for FIFOs, precedence and replay | Mixed |
+| `test_record_validation.py` | Direct launch-record schema and lifecycle rejection; emitted records, reopen and recovery after corruption | Mixed |
 | `test_continuation.py` | Execution-control changes, total ceilings, usage-stop approval and recovery | Subprocess |
 | `test_view.py` | Read-only record view: validation, snapshots, launch paths, reading beside a live controller | Mixed |
 | `test_continuation_validation.py` | Recorded execution controls and continuation authorization | Unit |
