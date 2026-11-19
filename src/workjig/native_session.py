@@ -222,7 +222,10 @@ class _Harness:
 
     ``source`` says whether the runtime assigns the session ID before
     reservation or observes it on stdout; ``capture`` is set only for the
-    latter.
+    latter. ``resolve`` asks the harness for a transcript path the receipt
+    lacks, and runs only when a reader requests it. ``store_under_home``
+    marks a store that must stay a direct child of the harness home, so only
+    its parent is resolved when the store is pinned.
     """
 
     name: str
@@ -237,8 +240,8 @@ class _Harness:
         ]
         | None
     ) = None
-
     resolve: Callable[[Path, str], Path | None] | None = None
+    store_under_home: bool = False
 
 
 # Keyed by output protocol; one entry per protocol in models.OutputProtocol.
@@ -255,6 +258,9 @@ _HARNESS = {
         _codex_transcript,
         _capture_codex,
         _codex_session.resolve_codex_path,
+        # Resolution passes the store's parent to Codex as CODEX_HOME. Following
+        # a sessions-only symlink would make its target's parent look like one.
+        store_under_home=True,
     ),
     "agy-stream-json": _Harness(
         "agy", "observed", _agy_store, _bind_agy, _agy_transcript, _capture_agy
@@ -271,12 +277,9 @@ def _store(worker: CommandWorker, harness: str, cwd: Path) -> Path:
         parts = Path(value).parts
         return home.joinpath(*parts[1:]) if parts and parts[0] == "~" else Path(value)
 
-    store = cwd / _BY_NAME[harness].store(env, expand)
-    if harness == "codex":
-        # Keep sessions under the actual Codex home. Following a sessions-only
-        # symlink here would make its target's parent look like CODEX_HOME.
-        return store.parent.resolve() / store.name
-    return store.resolve()
+    spec = _BY_NAME[harness]
+    store = cwd / spec.store(env, expand)
+    return store.parent.resolve() / store.name if spec.store_under_home else store.resolve()
 
 
 def bind_session(

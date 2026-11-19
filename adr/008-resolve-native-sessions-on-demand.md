@@ -25,3 +25,13 @@ cleanup failure. Each call can observe changes to the external store.
 There is no writeback. Passive inspection through `native_session` still
 requires only the records and filesystem. Revisit the helper if Codex adds
 a transcript path to the worker's public output.
+
+## Accepted limits
+
+- The recorded store path selects the `CODEX_HOME` the reader's Codex runs
+  with, so resolving executes Codex under configuration the run record points
+  to. What `codex app-server` loads from that directory at startup has not been
+  established. Resolve only runs and stores the reader trusts.
+- A Codex `sessions` directory that is a symlink is reported as unavailable,
+  because its target's parent would otherwise be taken for the Codex home.
+- `native_session` never yields a Codex transcript path; only resolution does.

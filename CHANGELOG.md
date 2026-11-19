@@ -16,8 +16,14 @@ so callers can update and decide whether existing run directories remain usable.
   and native session tracking (`track_native_session=True`). See
   `docs/harness-evidence.md` for bounded probe evidence and limits.
 - Opt in to launch-bound native transcript pointers in the harness adapters
-  (Codex, Claude Code, Pi and Antigravity CLI); inspect them with
-  `RunView.native_session()`.
+  (Codex, Claude Code, Pi and Antigravity CLI). `RunView.native_session()`
+  inspects the recorded pointer without starting a harness.
+  `RunView.resolve_native_session()` also locates a Codex transcript, which the
+  controller no longer looks up during a launch: a Codex receipt holds only the
+  thread ID, and resolution runs the reader's `codex` with `CODEX_HOME` set to
+  the parent of the recorded sessions directory. Callers that need a Codex
+  transcript path must use the resolving method. A symlinked Codex `sessions`
+  directory is reported as unavailable. Only resolve trusted runs.
 - Named input and output strings now preserve UTF-8 file line endings on new
   launches. Replay returns the string originally committed; it cannot recover
   line endings normalized by an older runtime. Use a fresh run when exact
