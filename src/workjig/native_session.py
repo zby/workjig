@@ -7,15 +7,25 @@ import os
 import shlex
 import stat
 import sys
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from threading import Event
 from typing import Literal
 from uuid import UUID
 
 from . import _session_receipt
+from ._session_observer import _UUID, observe_stdout
 from .models import CommandWorker, LaunchRecord
 
-_HARNESS = {"pi-json": "pi", "claude-stream-json": "claude", "codex-json": "codex"}
+_HARNESS = {
+    "pi-json": "pi",
+    "claude-stream-json": "claude",
+    "codex-json": "codex",
+    "agy-stream-json": "agy",
+}
+_AGY_TRANSCRIPT = (".system_generated", "logs", "transcript.jsonl")
 
 
 @dataclass(frozen=True)
@@ -44,9 +54,43 @@ def _store(worker: CommandWorker, harness: str, cwd: Path) -> Path:
         )
     elif harness == "claude":
         root = expand(env.get("CLAUDE_CONFIG_DIR", "~/.claude")) / "projects"
+    elif harness == "agy":
+        root = home / ".gemini" / "antigravity-cli" / "brain"
     else:
         root = expand(env.get("CODEX_HOME", "~/.codex")) / "sessions"
     return (cwd / root).resolve()
+
+
+def _agy_id(event: dict) -> str | None:
+    native_id = event.get("conversation_id")
+    if event.get("event") == "init" and isinstance(native_id, str) and _UUID.fullmatch(native_id):
+        return native_id
+    return None
+
+
+@contextmanager
+def capture_agy(stdout_path: Path, root: Path):
+    """Observe agy's init event alongside the worker; join only after settlement."""
+    stopped = Event()
+
+    def publish(native_id: str) -> None:
+        try:
+            _session_receipt.publish(
+                stdout_path.parent,
+                "agy",
+                native_id,
+                root.joinpath(native_id, *_AGY_TRANSCRIPT),
+            )
+        except OSError:
+            pass  # Optional evidence; never change the worker outcome.
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        observation = pool.submit(observe_stdout, stdout_path, stopped, _agy_id, publish)
+        try:
+            yield
+        finally:
+            stopped.set()
+        observation.result()
 
 
 def bind_session(
@@ -63,6 +107,20 @@ def bind_session(
         options = argv[1 : argv.index("--")] if "--" in argv else argv[1:]
         if any(arg.partition("=")[0] in {"resume", "--last", "fork"} for arg in options):
             raise ValueError("tracked Codex exec must start a new thread")
+        return argv, root
+    if harness == "agy":
+        skip_value = False
+        for arg in argv[1:]:
+            if skip_value:
+                skip_value = False
+                continue
+            if arg == "--":
+                break
+            if arg in {"-p", "--print", "--prompt"}:
+                skip_value = True
+                continue
+            if arg.partition("=")[0] in {"-c", "--continue", "--conversation", "--remote-agent"}:
+                raise ValueError("tracked agy must start a new local conversation")
         return argv, root
     identifier = str(UUID(launch.name))
     conflicts = {
@@ -102,10 +160,10 @@ def locate_session(worker: CommandWorker, recorded: LaunchRecord, launch: Path) 
     if not worker.track_native_session:
         return NativeSession("unassociated", None, None, None, None, "tracking disabled")
     harness = _HARNESS[worker.output_protocol]
-    source = "observed" if harness == "codex" else "assigned"
+    source = "observed" if harness in {"codex", "agy"} else "assigned"
     identifier = None
     try:
-        if harness != "codex":
+        if harness not in {"codex", "agy"}:
             identifier = str(UUID(launch.name))
         receipt = launch / "native-session.json"
         if receipt.resolve() != receipt or not receipt.is_file():
@@ -160,6 +218,8 @@ def locate_session(worker: CommandWorker, recorded: LaunchRecord, launch: Path) 
             path.name == sid + ".jsonl" or path.name.endswith("-" + sid + ".jsonl")
         ):
             raise ValueError("unexpected Codex transcript name")
+        elif harness == "agy" and path != root.joinpath(sid, *_AGY_TRANSCRIPT):
+            raise ValueError("unexpected agy transcript path")
         if path.resolve() != path or not path.is_file():
             raise ValueError("missing or redirected native transcript")
     except (OSError, ValueError, RuntimeError, TypeError, KeyError) as error:

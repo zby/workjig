@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import signal
-import stat
 import subprocess
 import sys
 import time
@@ -18,49 +16,29 @@ from threading import Event
 from typing import BinaryIO
 
 from . import _session_guard, _session_receipt, _windows
+from ._session_observer import _CHUNK, _UUID, EventObserver, _object, observe_stdout
 from .platform import OwnershipError, resolve_command
 
-_UUID = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}")
-_CHUNK = 64 * 1024
 _REPLY_LIMIT = 256 * 1024
 _LOOKUP_SECONDS = 2.0
-_POLL_SECONDS = 0.025
 
 
-def _object(line: bytes) -> dict:
-    if not line.lstrip().startswith(b"{"):
-        return {}
-    try:
-        value = json.loads(line.decode("utf-8"))
-    except (ValueError, RecursionError):
-        return {}
-    return value if isinstance(value, dict) else {}
+def _codex_id(event: dict) -> str | None:
+    native_id = event.get("thread_id")
+    if (
+        event.get("type") == "thread.started"
+        and isinstance(native_id, str)
+        and _UUID.fullmatch(native_id)
+    ):
+        return native_id
+    return None
 
 
-class _Events:
-    """Frame complete JSONL records across reads and discard oversized lines whole."""
+class _Events(EventObserver):
+    """Frame Codex JSONL records and extract canonical thread.started IDs."""
 
     def __init__(self) -> None:
-        self.pending = b""
-        self.skipping = False
-
-    def feed(self, chunk: bytes) -> str | None:
-        parts = chunk.split(b"\n")
-        for part in parts[:-1]:
-            if not self.skipping and len(self.pending) + len(part) <= _CHUNK:
-                event = _object(self.pending + part)
-                native_id = event.get("thread_id")
-                if (
-                    event.get("type") == "thread.started"
-                    and isinstance(native_id, str)
-                    and _UUID.fullmatch(native_id)
-                ):
-                    return native_id
-            self.skipping = False
-            self.pending = b""
-        self.skipping |= len(self.pending) + len(parts[-1]) > _CHUNK
-        self.pending = b"" if self.skipping else self.pending + parts[-1]
-        return None
+        super().__init__(_codex_id)
 
 
 def _messages(reader: BinaryIO, deadline: float) -> Iterator[dict]:
@@ -249,7 +227,7 @@ def capture_codex(stdout_path: Path, argv: tuple[str, ...], cwd: Path, env: Mapp
         return True
 
     def observe() -> str | None:
-        native_id = _observe(stdout_path, stopped, publish)
+        native_id = observe_stdout(stdout_path, stopped, _codex_id, lambda nid: publish(nid, None))
         if native_id and not stopped.is_set() and locate(native_id):
             return None
         return native_id
@@ -264,39 +242,3 @@ def capture_codex(stdout_path: Path, argv: tuple[str, ...], cwd: Path, env: Mapp
     if native_id:
         # An early thread/read can precede persistence. Try once after settlement.
         locate(native_id)
-
-
-def _observe(
-    stdout_path: Path, stopped: Event, publish: Callable[[str, Path | None], None]
-) -> str | None:
-    events = _Events()
-    final_bytes = 1024 * 1024
-    # Read only a regular launch log. A replaced FIFO must not stall settlement.
-    try:
-        if stdout_path.is_symlink() or not stdout_path.is_file():
-            return None
-        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
-        flags |= getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
-        stream = os.fdopen(os.open(stdout_path, flags), "rb")
-    except OSError:
-        return None
-    with stream:
-        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
-            return None
-        while True:
-            final = stopped.is_set()
-            try:
-                chunk = stream.read(_CHUNK)
-            except OSError:
-                return None
-            native_id = events.feed(chunk)
-            if native_id is not None:
-                publish(native_id, None)
-                return native_id
-            if final:
-                # A descendant may still be appending. Never chase its writes.
-                final_bytes -= len(chunk)
-                if len(chunk) < _CHUNK or final_bytes == 0:
-                    return None
-            elif len(chunk) < _CHUNK:
-                stopped.wait(_POLL_SECONDS)

@@ -153,6 +153,7 @@ def agy_worker(
     mode: Literal["accept-edits", "auto", "plan"] | None = None,
     sandbox: bool = True,
     effort: Literal["low", "medium", "high", "xhigh", "max"] | None = None,
+    track_native_session: bool = False,
 ) -> CommandWorker:
     """Construct an Antigravity CLI (agy 1.5.12) one-shot worker.
 
@@ -188,6 +189,7 @@ def agy_worker(
         argv=tuple(argv),
         name="agy",
         output_protocol="agy-stream-json",
+        track_native_session=track_native_session,
     )
 
 

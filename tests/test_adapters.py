@@ -95,14 +95,20 @@ def test_agy_command_uses_stream_json_sandbox_and_omits_permission_bypass():
 
 @pytest.mark.unit
 def test_agy_command_accepts_explicit_mode_effort_and_sandbox_toggle():
-    command = _render(
-        agy_worker("gemini-4-neon-high", mode="accept-edits", sandbox=False, effort="high")
+    worker = agy_worker(
+        "gemini-4-neon-high",
+        mode="accept-edits",
+        sandbox=False,
+        effort="high",
+        track_native_session=True,
     )
+    command = _render(worker)
     assert command[command.index("--mode") + 1] == "accept-edits"
     assert command[command.index("--effort") + 1] == "high"
     assert "--sandbox" not in command
     assert "--dangerously-skip-permissions" not in command
     assert command[-2] == "-p"
+    assert worker.track_native_session is True
 
 
 @pytest.mark.unit

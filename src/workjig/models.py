@@ -151,7 +151,6 @@ class RetryPolicy:
 
 
 _OUTPUT_PROTOCOLS = frozenset({"codex-json", "claude-stream-json", "pi-json", "agy-stream-json"})
-_TRACKABLE_PROTOCOLS = frozenset({"codex-json", "claude-stream-json", "pi-json"})
 
 
 @dataclass(frozen=True)
@@ -199,8 +198,6 @@ class CommandWorker:
             self.track_native_session and self.output_protocol is None
         ):
             raise ValueError("native session tracking requires an explicit harness protocol")
-        if self.track_native_session and self.output_protocol not in _TRACKABLE_PROTOCOLS:
-            raise ValueError("native session tracking is not supported for this output protocol")
         if (
             self.track_native_session
             and (self.evidence_file or "").rstrip(".").casefold() == "native-session.json"

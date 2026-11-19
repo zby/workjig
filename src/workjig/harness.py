@@ -151,14 +151,16 @@ def launch(
             timed_out = False
             try:
                 on_started(process.pid, argv, started_at)
-                if (
-                    request.worker.track_native_session
-                    and request.worker.output_protocol == "codex-json"
-                ):
-                    from ._codex_session import capture_codex
+                if request.worker.track_native_session:
+                    if request.worker.output_protocol == "codex-json":
+                        from ._codex_session import capture_codex
 
-                    # Join the observer only after the worker group has been settled.
-                    files.enter_context(capture_codex(stdout_path, command, workdir, env))
+                        # Join the observer only after the worker group has been settled.
+                        files.enter_context(capture_codex(stdout_path, command, workdir, env))
+                    elif request.worker.output_protocol == "agy-stream-json":
+                        from .native_session import capture_agy
+
+                        files.enter_context(capture_agy(stdout_path, paths["native_session_root"]))
                 timed_out = not process.wait(request.timeout_seconds)
             finally:
                 # Cleanup settles the whole owned group or raises, in which

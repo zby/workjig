@@ -278,12 +278,12 @@ when no controller is working.
 
 ### Locate a native session
 
-Pass `track_native_session=True` to `pi_worker`, `claude_worker`, or
-`codex_worker` (default: false). Native session tracking is not currently
-supported for `agy-stream-json`. A custom `CommandWorker` can set the same
-flag and matching `output_protocol` when it runs that native CLI with the
-same invocation shape: Pi and Claude take the prompt last; Codex runs its
-own executable in JSON exec mode. Do not supply competing session selection
+Pass `track_native_session=True` to `pi_worker`, `claude_worker`,
+`codex_worker`, or `agy_worker` (default: false). A custom `CommandWorker` can
+set the same flag and matching `output_protocol` when it runs that native CLI
+with the same invocation shape: Pi and Claude take the prompt last; Codex runs
+its own executable in JSON exec mode; Antigravity CLI (`agy`) runs in
+`stream-json` print mode (`-p`). Do not supply competing session selection
 flags. Tracking is part of the declared worker configuration, not inferred
 from its display name. The assigned IDs themselves are per-launch, not work
 identity. No Commonplace wrapper is needed.
@@ -299,7 +299,8 @@ for launch in call.launches:
 
 `unassociated` means tracking was disabled or no trustworthy ID was captured.
 `unavailable` means the ID is known but there is no safely resolved file.
-`source` is `assigned` (Pi/Claude) or `observed` (Codex) for a known ID.
+`source` is `assigned` (Pi/Claude) or `observed` (Codex/Antigravity CLI) for a
+known ID.
 This checks a live pointer, not part of the frozen view: retrying lookup can
 see a new receipt or a deleted log. The reader does not start a harness,
 open the transcript, inspect stdout, search personal history, or verify
@@ -316,10 +317,18 @@ A crash before an event is observed can leave no ID; an early stop, ephemeral
 session, or unavailable app-server can leave an ID without a path. The controller
 observes the ID while the worker runs; it may retry a missing locator once after
 settlement. Metadata lookup never extends the worker’s execution allowance.
+Antigravity CLI (`agy`) supplies its own `conversation_id` in the `init` event,
+and its transcript path is pinned to
+`<home>/.gemini/antigravity-cli/brain/<id>/.system_generated/logs/transcript.jsonl`
+(no helper subprocess is required; `--continue`, `-c`, `--conversation`, and
+`--remote-agent` are rejected on tracked launches). A crash before `init`
+leaves no ID; an early stop before `transcript.jsonl` exists leaves a known ID
+with `status="unavailable"`.
 
 The reservation pins the native store from the effective worker environment:
-Pi’s sessions root, `CLAUDE_CONFIG_DIR/projects`, or `CODEX_HOME/sessions`,
-with the harness defaults under the worker home. A receipt cannot redirect
+Pi’s sessions root, `CLAUDE_CONFIG_DIR/projects`, `CODEX_HOME/sessions`, or
+`<home>/.gemini/antigravity-cli/brain`, with the harness defaults under the
+worker home. A receipt cannot redirect
 lookup outside that store, into the original or copied run, or to a file named
 for a different ID. A harness using an unsupported storage layout returns
 `unavailable`; the reader does not discover a replacement by scanning.
