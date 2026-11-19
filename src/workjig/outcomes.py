@@ -50,12 +50,7 @@ def terminal_failure(protocol: str, stdout: Path) -> str | None:
     Missing or malformed completion evidence is process_error. The caller still
     checks process exit, cleanup, worker problems and delivered files.
     """
-    parser, key = {
-        "codex-json": (_codex, "type"),
-        "claude-stream-json": (_claude, "type"),
-        "pi-json": (_pi, "type"),
-        "agy-stream-json": (_agy, "event"),
-    }[protocol]
+    parser, key = _PARSERS[protocol]
     try:
         return parser(_records(stdout, key))
     except (OSError, UnicodeError, ValueError, RecursionError):
@@ -157,3 +152,12 @@ def _agy(records: Iterator[dict[str, object]]) -> str | None:
             else:
                 outcome = "process_error"
     return outcome
+
+
+# Keyed by output protocol: the classifier and the field naming each event.
+_PARSERS = {
+    "codex-json": (_codex, "type"),
+    "claude-stream-json": (_claude, "type"),
+    "pi-json": (_pi, "type"),
+    "agy-stream-json": (_agy, "event"),
+}

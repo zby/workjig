@@ -7,8 +7,9 @@ import os
 import shlex
 import stat
 import sys
+from collections.abc import Callable, Iterator, Mapping
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Event
@@ -19,13 +20,8 @@ from . import _session_receipt
 from ._session_observer import _UUID, observe_stdout
 from .models import CommandWorker, LaunchRecord
 
-_HARNESS = {
-    "pi-json": "pi",
-    "claude-stream-json": "claude",
-    "codex-json": "codex",
-    "agy-stream-json": "agy",
-}
 _AGY_TRANSCRIPT = (".system_generated", "logs", "transcript.jsonl")
+_RECEIPT_LIMIT = 65536
 
 
 @dataclass(frozen=True)
@@ -38,27 +34,135 @@ class NativeSession:
     reason: str | None
 
 
-def _store(worker: CommandWorker, harness: str, cwd: Path) -> Path:
-    env = os.environ | dict(worker.env)
-    home = Path(env.get("USERPROFILE" if os.name == "nt" else "HOME") or Path.home())
+# -- external stores -----------------------------------------------------------
+# Each takes the worker environment and a function expanding a leading "~".
 
-    def expand(value: str) -> Path:
-        parts = Path(value).parts
-        return home.joinpath(*parts[1:]) if parts and parts[0] == "~" else Path(value)
 
-    if harness == "pi":
-        root = (
-            expand(env["PI_CODING_AGENT_SESSION_DIR"])
-            if env.get("PI_CODING_AGENT_SESSION_DIR")
-            else expand(env.get("PI_CODING_AGENT_DIR", "~/.pi/agent")) / "sessions"
-        )
-    elif harness == "claude":
-        root = expand(env.get("CLAUDE_CONFIG_DIR", "~/.claude")) / "projects"
-    elif harness == "agy":
-        root = home / ".gemini" / "antigravity-cli" / "brain"
-    else:
-        root = expand(env.get("CODEX_HOME", "~/.codex")) / "sessions"
-    return (cwd / root).resolve()
+def _pi_store(env: Mapping[str, str], expand: Callable[[str], Path]) -> Path:
+    if env.get("PI_CODING_AGENT_SESSION_DIR"):
+        return expand(env["PI_CODING_AGENT_SESSION_DIR"])
+    return expand(env.get("PI_CODING_AGENT_DIR", "~/.pi/agent")) / "sessions"
+
+
+def _claude_store(env: Mapping[str, str], expand: Callable[[str], Path]) -> Path:
+    return expand(env.get("CLAUDE_CONFIG_DIR", "~/.claude")) / "projects"
+
+
+def _codex_store(env: Mapping[str, str], expand: Callable[[str], Path]) -> Path:
+    return expand(env.get("CODEX_HOME", "~/.codex")) / "sessions"
+
+
+def _agy_store(env: Mapping[str, str], expand: Callable[[str], Path]) -> Path:
+    return expand("~/.gemini/antigravity-cli/brain")
+
+
+# -- binding -------------------------------------------------------------------
+# Each validates the adapter command, may assign a session, and returns the
+# final command. Assigning publishes the receipt before reservation.
+
+_SESSION_OVERRIDES = frozenset(
+    {
+        "--session-id",
+        "--session",
+        "--session-dir",
+        "--fork",
+        "--continue",
+        "-c",
+        "--resume",
+        "-r",
+        "--no-session",
+        "--settings",
+        "--no-session-persistence",
+    }
+)
+
+
+def _assign(
+    harness: str, argv: tuple[str, ...], launch: Path, flags: tuple[str, ...], location: Path | None
+) -> tuple[str, ...]:
+    """Insert the session flags before the trailing prompt and publish the receipt."""
+    identifier = str(UUID(launch.name))
+    _session_receipt.publish(launch, harness, identifier, location)
+    return (*argv[:-1], "--session-id", identifier, *flags, argv[-1])
+
+
+def _reject_session_overrides(argv: tuple[str, ...]) -> None:
+    if any(arg.partition("=")[0] in _SESSION_OVERRIDES for arg in argv[1:-1]):
+        raise ValueError("tracked worker overrides session selection or settings")
+
+
+def _bind_pi(argv: tuple[str, ...], launch: Path, root: Path) -> tuple[str, ...]:
+    identifier = str(UUID(launch.name))
+    _reject_session_overrides(argv)
+    location = root / f"workjig-{identifier}"
+    location.mkdir(mode=0o700, parents=True, exist_ok=False)
+    return _assign("pi", argv, launch, ("--session-dir", str(location)), location)
+
+
+def _bind_claude(argv: tuple[str, ...], launch: Path, root: Path) -> tuple[str, ...]:
+    identifier = str(UUID(launch.name))
+    _reject_session_overrides(argv)
+    command = shlex.join([sys.executable, "-I", _session_receipt.__file__, str(launch), identifier])
+    settings = {"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": command}]}]}}
+    return _assign("claude", argv, launch, ("--settings", json.dumps(settings)), None)
+
+
+def _bind_codex(argv: tuple[str, ...], launch: Path, root: Path) -> tuple[str, ...]:
+    options = argv[1 : argv.index("--")] if "--" in argv else argv[1:]
+    if any(arg.partition("=")[0] in {"resume", "--last", "fork"} for arg in options):
+        raise ValueError("tracked Codex exec must start a new thread")
+    return argv
+
+
+def _bind_agy(argv: tuple[str, ...], launch: Path, root: Path) -> tuple[str, ...]:
+    skip_value = False
+    for arg in argv[1:]:
+        if skip_value:
+            skip_value = False
+            continue
+        if arg == "--":
+            break
+        if arg in {"-p", "--print", "--prompt"}:
+            skip_value = True
+            continue
+        if arg.partition("=")[0] in {"-c", "--continue", "--conversation", "--remote-agent"}:
+            raise ValueError("tracked agy must start a new local conversation")
+    return argv
+
+
+# -- transcript location -------------------------------------------------------
+# Each checks the reported location against the harness layout under the pinned
+# store and returns the transcript path, or raises ValueError.
+
+
+def _pi_transcript(root: Path, sid: str, path: Path) -> Path:
+    if path != root / f"workjig-{sid}":
+        raise ValueError("unexpected Pi session directory")
+    matches = list(path.glob(f"*_{sid}.jsonl"))
+    if len(matches) != 1:
+        raise ValueError("missing or ambiguous native transcript")
+    return matches[0]
+
+
+def _claude_transcript(root: Path, sid: str, path: Path) -> Path:
+    if path.name != sid + ".jsonl":
+        raise ValueError("unexpected Claude transcript name")
+    return path
+
+
+def _codex_transcript(root: Path, sid: str, path: Path) -> Path:
+    if not (path.name == sid + ".jsonl" or path.name.endswith("-" + sid + ".jsonl")):
+        raise ValueError("unexpected Codex transcript name")
+    return path
+
+
+def _agy_transcript(root: Path, sid: str, path: Path) -> Path:
+    if path != root.joinpath(sid, *_AGY_TRANSCRIPT):
+        raise ValueError("unexpected agy transcript path")
+    return path
+
+
+# -- observation while the worker runs -----------------------------------------
 
 
 def _agy_id(event: dict) -> str | None:
@@ -69,7 +173,7 @@ def _agy_id(event: dict) -> str | None:
 
 
 @contextmanager
-def capture_agy(stdout_path: Path, root: Path):
+def capture_agy(stdout_path: Path, root: Path) -> Iterator[None]:
     """Observe agy's init event alongside the worker; join only after settlement."""
     stopped = Event()
 
@@ -93,6 +197,72 @@ def capture_agy(stdout_path: Path, root: Path):
         observation.result()
 
 
+def _capture_codex(
+    stdout_path: Path, command: tuple[str, ...], cwd: Path, env: Mapping[str, str], root: Path
+) -> AbstractContextManager[None]:
+    from ._codex_session import capture_codex
+
+    return capture_codex(stdout_path, command, cwd, env)
+
+
+def _capture_agy(
+    stdout_path: Path, command: tuple[str, ...], cwd: Path, env: Mapping[str, str], root: Path
+) -> AbstractContextManager[None]:
+    return capture_agy(stdout_path, root)
+
+
+# -- the per-harness table -----------------------------------------------------
+
+
+@dataclass(frozen=True)
+class _Harness:
+    """Everything session tracking knows about one harness.
+
+    ``source`` says whether the runtime assigns the session ID before
+    reservation or observes it on stdout; ``capture`` is set only for the
+    latter.
+    """
+
+    name: str
+    source: Literal["assigned", "observed"]
+    store: Callable[[Mapping[str, str], Callable[[str], Path]], Path]
+    bind: Callable[[tuple[str, ...], Path, Path], tuple[str, ...]]
+    transcript: Callable[[Path, str, Path], Path]
+    capture: (
+        Callable[
+            [Path, tuple[str, ...], Path, Mapping[str, str], Path], AbstractContextManager[None]
+        ]
+        | None
+    ) = None
+
+
+# Keyed by output protocol; one entry per protocol in models.OutputProtocol.
+_HARNESS = {
+    "pi-json": _Harness("pi", "assigned", _pi_store, _bind_pi, _pi_transcript),
+    "claude-stream-json": _Harness(
+        "claude", "assigned", _claude_store, _bind_claude, _claude_transcript
+    ),
+    "codex-json": _Harness(
+        "codex", "observed", _codex_store, _bind_codex, _codex_transcript, _capture_codex
+    ),
+    "agy-stream-json": _Harness(
+        "agy", "observed", _agy_store, _bind_agy, _agy_transcript, _capture_agy
+    ),
+}
+_BY_NAME = {harness.name: harness for harness in _HARNESS.values()}
+
+
+def _store(worker: CommandWorker, harness: str, cwd: Path) -> Path:
+    env = os.environ | dict(worker.env)
+    home = Path(env.get("USERPROFILE" if os.name == "nt" else "HOME") or Path.home())
+
+    def expand(value: str) -> Path:
+        parts = Path(value).parts
+        return home.joinpath(*parts[1:]) if parts and parts[0] == "~" else Path(value)
+
+    return (cwd / _BY_NAME[harness].store(env, expand)).resolve()
+
+
 def bind_session(
     worker: CommandWorker, launch: Path, cwd: Path, argv: tuple[str, ...]
 ) -> tuple[tuple[str, ...], Path | None]:
@@ -100,87 +270,59 @@ def bind_session(
     if not worker.track_native_session:
         return argv, None
     harness = _HARNESS[worker.output_protocol]
-    root = _store(worker, harness, cwd)
+    root = _store(worker, harness.name, cwd)
     if root.is_relative_to(launch.parents[1]):
         raise ValueError("tracked native session store must be outside the run")
-    if harness == "codex":
-        options = argv[1 : argv.index("--")] if "--" in argv else argv[1:]
-        if any(arg.partition("=")[0] in {"resume", "--last", "fork"} for arg in options):
-            raise ValueError("tracked Codex exec must start a new thread")
-        return argv, root
-    if harness == "agy":
-        skip_value = False
-        for arg in argv[1:]:
-            if skip_value:
-                skip_value = False
-                continue
-            if arg == "--":
-                break
-            if arg in {"-p", "--print", "--prompt"}:
-                skip_value = True
-                continue
-            if arg.partition("=")[0] in {"-c", "--continue", "--conversation", "--remote-agent"}:
-                raise ValueError("tracked agy must start a new local conversation")
-        return argv, root
-    identifier = str(UUID(launch.name))
-    conflicts = {
-        "--session-id",
-        "--session",
-        "--session-dir",
-        "--fork",
-        "--continue",
-        "-c",
-        "--resume",
-        "-r",
-        "--no-session",
-        "--settings",
-        "--no-session-persistence",
-    }
-    if any(arg.partition("=")[0] in conflicts for arg in argv[1:-1]):
-        raise ValueError("tracked worker overrides session selection or settings")
-    flags = ["--session-id", identifier]
-    location = None
-    if harness == "pi":
-        location = root / f"workjig-{identifier}"
-        location.mkdir(mode=0o700, parents=True, exist_ok=False)
-        flags.extend(("--session-dir", str(location)))
-    else:
-        command = shlex.join(
-            [sys.executable, "-I", _session_receipt.__file__, str(launch), identifier]
-        )
-        settings = {
-            "hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": command}]}]}
-        }
-        flags.extend(("--settings", json.dumps(settings)))
-    _session_receipt.publish(launch, harness, identifier, location)
-    return (*argv[:-1], *flags, argv[-1]), root
+    return harness.bind(argv, launch, root), root
+
+
+def capture_session(
+    worker: CommandWorker,
+    stdout_path: Path,
+    command: tuple[str, ...],
+    cwd: Path,
+    env: Mapping[str, str],
+    root: Path | None,
+) -> AbstractContextManager[None]:
+    """Observe a tracked worker's session start; leave only after group cleanup.
+
+    Does nothing when tracking is off or the session was assigned at binding.
+    """
+    if not worker.track_native_session or root is None:
+        return nullcontext()
+    capture = _HARNESS[worker.output_protocol].capture
+    return capture(stdout_path, command, cwd, env, root) if capture else nullcontext()
+
+
+def _read_receipt(launch: Path) -> object:
+    """Parse the launch's pointer file from a bounded read of a regular file."""
+    receipt = launch / "native-session.json"
+    if receipt.resolve() != receipt or not receipt.is_file():
+        raise ValueError("missing or redirected pointer")
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
+    flags |= getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
+    with os.fdopen(os.open(receipt, flags), "rb") as stream:
+        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+            raise ValueError("not a regular pointer file")
+        raw = stream.read(_RECEIPT_LIMIT + 1)
+    if len(raw) > _RECEIPT_LIMIT:
+        raise ValueError("oversized pointer")
+    return json.loads(raw)
 
 
 def locate_session(worker: CommandWorker, recorded: LaunchRecord, launch: Path) -> NativeSession:
     if not worker.track_native_session:
         return NativeSession("unassociated", None, None, None, None, "tracking disabled")
     harness = _HARNESS[worker.output_protocol]
-    source = "observed" if harness in {"codex", "agy"} else "assigned"
     identifier = None
     try:
-        if harness not in {"codex", "agy"}:
+        if harness.source == "assigned":
             identifier = str(UUID(launch.name))
-        receipt = launch / "native-session.json"
-        if receipt.resolve() != receipt or not receipt.is_file():
-            raise ValueError("missing or redirected pointer")
-        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
-        flags |= getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
-        with os.fdopen(os.open(receipt, flags), "rb") as stream:
-            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
-                raise ValueError("not a regular pointer file")
-            raw = stream.read(65537)
-        if len(raw) > 65536:
-            raise ValueError("oversized pointer")
-        data = json.loads(raw)
+        data = _read_receipt(launch)
         if (
             not isinstance(data, dict)
             or data.get("launch") != launch.name
-            or data.get("harness") != harness
+            or data.get("harness") != harness.name
         ):
             raise ValueError("pointer does not match this launch")
         sid = data["id"]
@@ -205,30 +347,16 @@ def locate_session(worker: CommandWorker, recorded: LaunchRecord, launch: Path) 
             or (len(original.parents) >= 2 and path.is_relative_to(original.parents[1]))
         ):
             raise ValueError("transcript outside the pinned native store or redirected")
-        if harness == "pi":
-            if path != root / f"workjig-{sid}":
-                raise ValueError("unexpected Pi session directory")
-            matches = list(path.glob(f"*_{sid}.jsonl"))
-            if len(matches) != 1:
-                raise ValueError("missing or ambiguous native transcript")
-            path = matches[0]
-        elif harness == "claude" and path.name != sid + ".jsonl":
-            raise ValueError("unexpected Claude transcript name")
-        elif harness == "codex" and not (
-            path.name == sid + ".jsonl" or path.name.endswith("-" + sid + ".jsonl")
-        ):
-            raise ValueError("unexpected Codex transcript name")
-        elif harness == "agy" and path != root.joinpath(sid, *_AGY_TRANSCRIPT):
-            raise ValueError("unexpected agy transcript path")
+        path = harness.transcript(root, sid, path)
         if path.resolve() != path or not path.is_file():
             raise ValueError("missing or redirected native transcript")
     except (OSError, ValueError, RuntimeError, TypeError, KeyError) as error:
         return NativeSession(
             "unavailable" if identifier else "unassociated",
-            harness,
+            harness.name,
             identifier,
-            source if identifier else None,
+            harness.source if identifier else None,
             None,
             str(error),
         )
-    return NativeSession("located", harness, identifier, source, path, None)
+    return NativeSession("located", harness.name, identifier, harness.source, path, None)

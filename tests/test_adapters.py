@@ -310,3 +310,15 @@ def test_agy_evidence_records_errors_and_denied_actions_without_empty_session():
     )
     assert denied_evidence["session_id"] == "conv-2"
     assert denied_evidence["denied_actions"] == [{"action": "command", "display_name": "Bash"}]
+
+
+@pytest.mark.unit
+def test_every_output_protocol_is_covered_by_each_harness_table() -> None:
+    from workjig import adapters, models, native_session, outcomes
+
+    protocols = models._OUTPUT_PROTOCOLS
+    assert set(outcomes._PARSERS) == protocols
+    assert set(native_session._HARNESS) == protocols
+    names = {harness.name for harness in native_session._HARNESS.values()}
+    assert len(names) == len(protocols)
+    assert set(adapters._EVIDENCE) == names
