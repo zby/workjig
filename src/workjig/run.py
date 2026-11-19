@@ -8,8 +8,9 @@ import tempfile
 import threading
 import time
 import uuid
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from functools import partial
@@ -251,6 +252,16 @@ class Run:
                 return
             raise KeyError(launch_id)
 
+    @contextmanager
+    def _call_state(self) -> Iterator[None]:
+        """Do not release the mutex with a known integrity failure still admitting launches."""
+        with self._mutex:
+            try:
+                yield
+            except RecordError:
+                self._poisoned = True
+                raise
+
     # -- calls ---------------------------------------------------------------
 
     def call(self, request: Request, *, resume_usage_stop: str | None = None) -> CallResult:
@@ -278,7 +289,7 @@ class Run:
         may_have_reserved = False
         try:
             while True:
-                with self._mutex:
+                with self._call_state():
                     state = self._ensure_open()
                     self._assert_no_stale_launches()
                     entry = state.find(request.call_id, request_hash)
@@ -291,7 +302,7 @@ class Run:
                 if plan.backoff_seconds:
                     self._sleep(plan.backoff_seconds)
                 reserved, paths, argv = self._prepare_launch(request, plan.approved_stop)
-                with self._mutex:
+                with self._call_state():
                     self._assert_no_stale_launches()
                     entry = self._ensure_open().entry(request, request_hash, self._payloads)
                     may_have_reserved = True
@@ -305,7 +316,7 @@ class Run:
                     partial(self._mark_running, entry, reserved),
                     retain_logs=self._retain_logs,
                 )
-                with self._mutex:
+                with self._call_state():
                     self._commit(entry, attempt, outputs)
                     may_have_reserved = False
                     if _history_final(entry, request):
@@ -364,9 +375,11 @@ class Run:
 
     def _commit(self, entry: CallEntry, attempt: LaunchRecord, outputs: dict[str, str]) -> None:
         """Settle the owned launch; a delivered outcome commits its outputs atomically."""
-        entry.launches[-1] = attempt
         if attempt.status == LaunchStatus.DELIVERED:
+            # Publication may fail. Leave the running launch intact so a settling
+            # sibling cannot persist a delivered launch without its result.
             entry.delivery = Delivery.store(outputs, attempt.launch_id, self._payloads)
+        entry.launches[-1] = attempt
         self._write_state()
         self._owned_launches.remove(attempt.launch_id)
 

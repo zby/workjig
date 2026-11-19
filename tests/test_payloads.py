@@ -5,6 +5,7 @@ import json
 import shutil
 import sys
 from dataclasses import replace
+from threading import Barrier, Event
 
 import pytest
 
@@ -62,8 +63,10 @@ def test_call_payloads_shared_but_work_and_launches_independent(tmp_path):
         blob.unlink()
         with pytest.raises(RecordError, match="payload"):
             run.call(req)
-        with pytest.raises(RecordError, match="payload"):
-            run.call(replace(req, call_id="third"))
+        original = (copied / "run.json").read_bytes()
+        with pytest.raises(RecordError, match="uncertain"):
+            run.call(replace(req, call_id="third", task="disjoint", inputs={"in.txt": "untouched"}))
+        assert (copied / "run.json").read_bytes() == original
         assert not blob.exists()
     with pytest.raises(RecordError, match="payload"):
         read_run(copied)
@@ -106,9 +109,51 @@ def test_interrupted_blob_publication_cannot_commit_a_reservation(tmp_path, monk
                 sync(directory)
 
             patch.setattr(payloads, "sync_directory", fail)
-            with pytest.raises(OSError, match="directory sync"):
-                run.call(req)
+            for _ in range(3):  # The orphan must not bypass the failed flush on retry.
+                with pytest.raises(OSError, match="directory sync"):
+                    run.call(req)
         assert (path / "run.json").read_bytes() == original
         assert (path / "payloads" / DIGEST).is_file()  # Orphan, not evidence of a launch.
         assert not read_run(path).calls
         assert not run.unresolved_launches()
+
+
+@pytest.mark.subprocess
+def test_parallel_failed_payload_write_leaves_only_that_launch_unresolved(tmp_path, monkeypatch):
+    from workjig import run as runtime
+
+    launch, put = runtime.launch, PayloadStore.put
+    started, failing = Barrier(2), Event()
+
+    def finish(request, *args, **kwargs):
+        result = launch(request, *args, **kwargs)
+        started.wait(timeout=5)
+        if request.call_id == "B":
+            assert failing.wait(5)
+        return result
+
+    def inject(store, text):
+        if text == "result-A":
+            failing.set()
+            raise OSError("output publication failed")
+        return put(store, text)
+
+    monkeypatch.setattr(runtime, "launch", finish)
+    monkeypatch.setattr(PayloadStore, "put", inject)
+    code = "from pathlib import Path; import sys; Path(sys.argv[1]).write_text(sys.argv[2])"
+    reqs = [
+        Request(
+            k,
+            k,
+            {},
+            ("out",),
+            CommandWorker((sys.executable, "-c", code, "{output_dir}/out", f"result-{k}")),
+        )
+        for k in ("A", "B")
+    ]
+    root = tmp_path / "records"
+    with Run(root, tmp_path) as run, pytest.raises(ExceptionGroup):
+        run.parallel(reqs, max_workers=2)
+    view = read_run(root)
+    assert {c.call_id: c.status for c in view.calls} == {"A": "running", "B": "delivered"}
+    assert len(view.unresolved_launches()) == 1

@@ -22,7 +22,7 @@ class PayloadStore:
         self.root = record_dir / "payloads"
         self._known: set[str] = set()
 
-    def get(self, digest: object) -> str:
+    def _read(self, digest: object) -> str:
         if not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest):
             raise RecordError("invalid payload reference")
         path = self.root / digest
@@ -39,6 +39,11 @@ class PayloadStore:
             value = data.decode("utf-8")
         except (OSError, UnicodeError) as error:
             raise RecordError(f"cannot read payload {digest}: {error}") from error
+        return value
+
+    def get(self, digest: str) -> str:
+        """Resolve an already-committed reference."""
+        value = self._read(digest)
         self._known.add(digest)
         return value
 
@@ -56,8 +61,8 @@ class PayloadStore:
             # The directory entry itself must survive before a manifest refers into it.
             sync_directory(self.root.parent)
         if os.path.lexists(path):
-            # A previous interrupted publication may have left this file behind.
-            self.get(digest)
+            # Do not mark a verified orphan known until its directory entry is durable.
+            self._read(digest)
         else:
             fd, tmp = tempfile.mkstemp(prefix=".payload-", dir=self.root)
             try:
