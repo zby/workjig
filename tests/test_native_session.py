@@ -40,6 +40,7 @@ for event in terminal: print(json.dumps(event))
 
 @pytest.mark.subprocess
 @pytest.mark.parametrize("adapter", ["pi", "claude"])
+@pytest.mark.slow
 def test_lookup_after_timeout_retry_and_shallow_copy(tmp_path, adapter):
     store = tmp_path / "external sessions" / ("projects" if adapter == "claude" else "sessions")
     store.mkdir(parents=True)
@@ -97,6 +98,7 @@ def test_lookup_after_timeout_retry_and_shallow_copy(tmp_path, adapter):
 
 
 @pytest.mark.subprocess
+@pytest.mark.slow
 def test_codex_timeout_and_retry_resolve_distinct_native_ids(tmp_path):
     external = tmp_path / "native" / "sessions"
     external.mkdir(parents=True)
@@ -235,6 +237,7 @@ def test_generic_command_cannot_enable_tracking_without_protocol():
 
 
 @pytest.mark.subprocess
+@pytest.mark.slow
 def test_agy_timeout_and_retry_resolve_distinct_native_ids(tmp_path):
     home = tmp_path / "agy-home"
     brain = home / ".gemini" / "antigravity-cli" / "brain"
@@ -386,6 +389,7 @@ def test_agy_partial_init_and_missing_transcript(tmp_path):
 
 
 @pytest.mark.subprocess
+@pytest.mark.slow
 def test_agy_slow_receipt_does_not_extend_worker_lifetime(tmp_path, monkeypatch):
     home = tmp_path / "agy-home"
     home.mkdir()

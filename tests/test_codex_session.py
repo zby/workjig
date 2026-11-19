@@ -70,6 +70,7 @@ def test_metadata_lookup_fails_closed(tmp_path, reply):
 
 
 @pytest.mark.subprocess
+@pytest.mark.slow
 def test_slow_receipt_does_not_extend_worker_lifetime(tmp_path, monkeypatch):
     # Synchronize the worker with the receipt writer, not with interpreter startup.
     def slow(*_):
@@ -124,6 +125,7 @@ def test_partial_start_event_is_not_an_association(tmp_path):
 
 @pytest.mark.subprocess
 @pytest.mark.skipif(os.name == "nt", reason="POSIX supervisor; Windows uses a kill-on-close job")
+@pytest.mark.slow
 def test_controller_death_does_not_orphan_metadata_helper(tmp_path):
     # Both leader and child ignore a closed stdin; the child even ignores SIGTERM.
     (tmp_path / "app-server").write_text("""\

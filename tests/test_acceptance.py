@@ -442,6 +442,7 @@ def test_runtime_managed_names_reject_escape(
 
 
 @pytest.mark.subprocess
+@pytest.mark.slow
 def test_unresolved_reservation_blocks_resume_until_old_worker_stops(
     command_script: Path, tmp_path: Path
 ) -> None:

@@ -14,11 +14,30 @@ Run it from the package root:
 
 ```sh
 uv sync --locked
-uv run pytest                  # all deterministic tests; no real model calls
+uv run pytest                  # all deterministic tests, both speed lanes
+uv run pytest -m 'not slow'    # fast iteration; includes many real subprocesses
+uv run pytest -m slow          # longer deterministic timeout/recovery probes
 uv run pytest -m unit          # direct function and file-based tests
 uv run pytest -m subprocess    # deterministic worker-process integration
 uv run pytest tests/examples   # deterministic example coverage
 ```
+
+Choose by what changed first. For example:
+
+| Changed | Run (paths under `tests/`) |
+|---|---|
+| Worker start, termination or descendant ownership | `test_process_ownership.py test_platform.py test_windows_process.py` |
+| Commit, interruption or launch allowances | `test_recovery.py test_acceptance.py test_continuation.py test_continuation_validation.py` |
+| Run storage, read-only inspection or locks | `test_record_validation.py test_view.py test_locking.py test_recovery.py` |
+| Worker paths, outputs, metadata or exit status | `test_worker_protocol.py test_metadata.py test_outcomes.py` |
+| Harness arguments, protocol rules or native-session pointers | `test_adapters.py test_outcomes.py test_native_session.py test_codex_session.py` |
+
+`slow` is an additional marker for cases with substantial intentional waits,
+not a time limit or another word for `subprocess`. Mark individual parameters
+when only the timeout branch waits. A subject run such as
+`uv run pytest tests/test_process_ownership.py` includes the slow cases for
+that subject. Use both speed lanes before integration. Default pytest and CI
+continue to include every deterministic case; neither speed lane opts into live tests.
 
 Every test must have exactly one execution-boundary marker (`unit` or
 `subprocess`). Collection rejects missing or overlapping markers; unknown
@@ -37,7 +56,9 @@ This is collection separation, not a suite of automatically skipped tests.
 | `test_platform.py` | Command resolution and POSIX session start, with the platform module patched | Unit |
 | `test_windows_process.py` | Windows job-object ownership policy against a fake `kernel32`, runnable on any host | Unit |
 | `test_outcomes.py` | Captured/synthetic stream classification; representative runtime outcome, retry and replay cases | Mixed |
-| `test_core.py` | Request validation, locks, durable accounting, process ownership and cleanup | Mixed |
+| `test_worker_protocol.py` | Request validation, command execution, worker files and opaque logs | Mixed |
+| `test_process_ownership.py` | Signals, descendants, timeouts and cleanup | Subprocess |
+| `test_recovery.py` | Interrupted reservations, controller death, workdir binding and durable replay | Mixed |
 | `test_acceptance.py` | Public API and ordinary-file workflow, parallel settlement, corrections and recovery | Mixed |
 | `test_metadata.py` | Problem/evidence parsing, plus bounded worker probes for FIFOs, precedence and replay | Mixed |
 | `test_record_validation.py` | Direct launch-record schema and lifecycle rejection; emitted records, reopen and recovery after corruption | Mixed |
