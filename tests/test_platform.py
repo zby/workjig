@@ -25,6 +25,10 @@ def test_command_resolution_searches_the_worker_path(
     resolved = platform.resolve_command((name, "--flag"), {"PATH": str(tmp_path / "worker")})
 
     assert resolved == (str(tmp_path / "worker" / name), "--flag")
+    assert platform.resolve_command((name, "--flag"), {}) == (
+        str(tmp_path / "controller" / name),
+        "--flag",
+    )
     assert platform.resolve_command(("absent-tool",), {"PATH": str(tmp_path / "worker")}) == (
         "absent-tool",
     )
