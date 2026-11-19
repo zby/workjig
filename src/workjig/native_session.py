@@ -16,7 +16,7 @@ from threading import Event
 from typing import BinaryIO, Literal
 from uuid import UUID
 
-from . import _codex_session, _session_receipt
+from . import _session_receipt
 from ._session_observer import _UUID, observe_stdout
 from .models import CommandWorker, LaunchRecord
 
@@ -165,6 +165,17 @@ def _agy_transcript(root: Path, sid: str, path: Path) -> Path:
 # -- observation while the worker runs -----------------------------------------
 
 
+def _codex_id(event: dict) -> str | None:
+    native_id = event.get("thread_id")
+    if (
+        event.get("type") == "thread.started"
+        and isinstance(native_id, str)
+        and _UUID.fullmatch(native_id)
+    ):
+        return native_id
+    return None
+
+
 def _agy_id(event: dict) -> str | None:
     native_id = event.get("conversation_id")
     if event.get("event") == "init" and isinstance(native_id, str) and _UUID.fullmatch(native_id):
@@ -200,9 +211,7 @@ def _capture_observed(
 def _capture_codex(
     stdout: Path | BinaryIO, launch_dir: Path, root: Path
 ) -> AbstractContextManager[None]:
-    return _capture_observed(
-        stdout, launch_dir, "codex", _codex_session._codex_id, lambda sid: None
-    )
+    return _capture_observed(stdout, launch_dir, "codex", _codex_id, lambda sid: None)
 
 
 def _capture_agy(
@@ -211,6 +220,13 @@ def _capture_agy(
     return _capture_observed(
         stdout, launch_dir, "agy", _agy_id, lambda sid: root.joinpath(sid, *_AGY_TRANSCRIPT)
     )
+
+
+def _resolve_codex(root: Path, native_id: str) -> Path | None:
+    # Imported on use: only a reader resolving a Codex launch needs the helper.
+    from ._codex_session import resolve_codex_path
+
+    return resolve_codex_path(root, native_id)
 
 
 # -- the per-harness table -----------------------------------------------------
@@ -257,7 +273,7 @@ _HARNESS = {
         _bind_codex,
         _codex_transcript,
         _capture_codex,
-        _codex_session.resolve_codex_path,
+        _resolve_codex,
         # Resolution passes the store's parent to Codex as CODEX_HOME. Following
         # a sessions-only symlink would make its target's parent look like one.
         store_under_home=True,

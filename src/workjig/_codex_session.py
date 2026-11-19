@@ -1,4 +1,4 @@
-"""Capture the Codex exec thread ID and query its app-server metadata."""
+"""Query Codex app-server metadata for one thread; loaded only when a reader resolves."""
 
 from __future__ import annotations
 
@@ -20,17 +20,6 @@ from .platform import OwnershipError, resolve_command
 
 _REPLY_LIMIT = 256 * 1024
 _LOOKUP_SECONDS = 2.0
-
-
-def _codex_id(event: dict) -> str | None:
-    native_id = event.get("thread_id")
-    if (
-        event.get("type") == "thread.started"
-        and isinstance(native_id, str)
-        and _UUID.fullmatch(native_id)
-    ):
-        return native_id
-    return None
 
 
 def _messages(reader: BinaryIO, deadline: float) -> Iterator[dict]:
