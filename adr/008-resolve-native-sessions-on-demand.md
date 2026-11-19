@@ -29,6 +29,18 @@ naming the parameter, so an undetermined answer is never mistaken for an
 unavailable transcript. Revisit the helper if Codex adds
 a transcript path to the worker's public output.
 
+## Evidence
+
+- In one bounded live probe on Linux with `codex-cli 0.170.0` (2026-11-19), a
+  tracked `codex exec` launch was delivered with a receipt holding the thread
+  ID and no location. Read from a copy of the run, the lookup without
+  `resolve=True` raised `UnresolvedSessionError`; with it, each of two calls
+  returned `located` in about 0.3 seconds, naming an existing
+  `sessions/2026/11/19/rollout-<start time>-<id>.jsonl` under the pinned
+  store. The receipt was unchanged afterwards and no helper process remained.
+- This is one version on one platform. The helper's `thread/read` reply path is
+  still the unstable field described in ADR 006. Windows was not probed.
+
 ## Accepted limits
 
 - The recorded store path selects the `CODEX_HOME` the reader's Codex runs
