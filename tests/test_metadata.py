@@ -97,11 +97,15 @@ request = Request('metadata', 'Write answer.', {}, ('answer.txt',), CommandWorke
     (sys.executable, worker, '{problem_file}', '{evidence_file}', '{output_dir}',
      problem, evidence, outcome),
     output_protocol='pi-json' if outcome == 'log_fifo' else None),
-    timeout_seconds=0.5, max_launches=max_launches)
+    timeout_seconds=1 if outcome == 'timeout' else 5, max_launches=max_launches)
 with Run(root / 'records', root) as run:
     result = run.call(request)
 assert result.status == expected, result
 assert len(result.launches) == 1
+if outcome == 'timeout':
+    # This file is written after both metadata files, before sleeping. A timeout
+    # during Python startup would not actually exercise metadata precedence.
+    assert (Path(result.launches[0].launch_dir) / 'outputs/answer.txt').read_text() == 'done'
 assert result.launches[0].finished_at is not None
 assert result.launches[0].evidence in (None, {}), result
 assert result.failed_at_launch_limit == (expected != 'delivered' and max_launches == 1)

@@ -13,18 +13,19 @@ from workjig.records import launch_from_json, launch_to_json
 @pytest.fixture
 def delivered_launch():
     stamp = "2026-01-01T00:00:00+00:00"
-    return launch_to_json(
-        LaunchRecord(
-            "id",
-            "delivered",
-            "/launch",
-            ("worker",),
-            pid=1,
-            returncode=0,
-            started_at=stamp,
-            finished_at=stamp,
-        )
+    launch = LaunchRecord(
+        "id",
+        "delivered",
+        "/launch",
+        ("worker",),
+        pid=1,
+        returncode=0,
+        started_at=stamp,
+        finished_at=stamp,
     )
+    raw = launch_to_json(launch)
+    assert launch_from_json(raw) == launch  # Each mutation starts from a valid record.
+    return raw
 
 
 @pytest.fixture
