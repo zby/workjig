@@ -53,6 +53,12 @@ they cannot become another launch's result. The runtime records returned
 content with the invocation that produced it. Model or session identity that
 the harness does not establish remains unknown.
 
+Optional native-session tracking is per physical launch, not per logical call.
+An assigned session ID is not proof that a worker started. A known ID is not
+proof that a readable or complete transcript exists. Workjig retains a compact
+locator, never copies a native transcript, and never uses it to settle or
+recover a launch. See [ADR 006](../adr/006-locate-native-sessions.md).
+
 Only complete, atomically committed result records are reusable. Workflow
 acceptance is separate: a resumed workflow reruns its checks against the
 intended input snapshot. It must not use changing sibling output state as an

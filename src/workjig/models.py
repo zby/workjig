@@ -166,6 +166,8 @@ class CommandWorker:
     evidence_file: str | None = None
     output_protocol: Literal["codex-json", "claude-stream-json", "pi-json"] | None = None
 
+    track_native_session: bool = False
+
     def __post_init__(self) -> None:
         argv = tuple(self.argv)
         if not argv or not all(isinstance(x, str) and x for x in argv):
@@ -187,6 +189,12 @@ class CommandWorker:
             or self.output_protocol not in {"codex-json", "claude-stream-json", "pi-json"}
         ):
             raise ValueError("unsupported output protocol")
+        if type(self.track_native_session) is not bool or (
+            self.track_native_session and self.output_protocol is None
+        ):
+            raise ValueError("native session tracking requires an explicit harness protocol")
+        if self.track_native_session and self.evidence_file == "native-session.json":
+            raise ValueError("evidence file conflicts with native session receipt")
         object.__setattr__(self, "argv", argv)
         object.__setattr__(self, "env", MappingProxyType(env))
 

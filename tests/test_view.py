@@ -62,7 +62,7 @@ def _entry(request: Request, launches: list[LaunchRecord], outputs: dict | None 
 
 def _write(records: Path, calls: dict[str, list[tuple[Request, dict]]]) -> None:
     state = {
-        "version": 2,
+        "version": 3,
         "workdir": "/original/workdir",
         "calls": {
             call_id: {
@@ -217,11 +217,11 @@ def test_absent_record_is_none(tmp_path: Path) -> None:
     [
         "{not json",
         json.dumps({"version": 1, "workdir": "/w", "calls": {}}),
-        json.dumps({"version": 3, "workdir": "/w", "calls": {}}),
+        json.dumps({"version": 2, "workdir": "/w", "calls": {}}),
         b"\xff\xfe",
         "[" * 200_000,
     ],
-    ids=["not-json", "version-1", "version-3", "not-utf8", "nested-too-deeply"],
+    ids=["not-json", "version-1", "version-2", "not-utf8", "nested-too-deeply"],
 )
 @pytest.mark.unit
 def test_corrupt_or_unsupported_record_raises(tmp_path: Path, content: str | bytes) -> None:

@@ -269,6 +269,49 @@ commit fail, which leaves the controller uncertain and its launch unresolved;
 this has not been reproduced or ruled out. Until it is, read on Windows only
 when no controller is working.
 
+### Locate a native session
+
+Pass `track_native_session=True` to `pi_worker`, `claude_worker`, or
+`codex_worker` (default: false). A custom `CommandWorker` can set the same
+flag and matching `output_protocol` when it runs that native CLI with the
+same invocation shape: Pi and Claude take the prompt last; Codex runs its
+own executable in JSON exec mode. Do not supply competing session selection
+flags. Tracking is part of the declared worker configuration, not inferred
+from its display name. The assigned IDs themselves are per-launch, not work
+identity. No Commonplace wrapper is needed.
+
+```python
+for launch in call.launches:
+    session = view.native_session(launch)
+    if session.status == "located":
+        audit(session.path)  # caller policy; the file can still change or disappear
+    else:
+        print(session.status, session.session_id, session.reason)
+```
+
+`unassociated` means tracking was disabled or no trustworthy ID was captured.
+`unavailable` means the ID is known but there is no safely resolved file.
+`source` is `assigned` (Pi/Claude) or `observed` (Codex) for a known ID.
+This checks a live pointer, not part of the frozen view: retrying lookup can
+see a new receipt or a deleted log. The reader does not start a harness,
+open the transcript, inspect stdout, search personal history, or verify
+transcript integrity. Only inspect trusted runs; a locator is not authorization
+to grant access to an external file.
+
+Tracked Pi uses a fresh directory under `PI_CODING_AGENT_SESSION_DIR`
+(default: the agent's sessions root), outside the run. Claude reports its
+path via a per-launch `SessionStart` hook; disabling hooks can leave a known
+ID without a path. Workjig supplies the hook settings; combining with a
+second explicit `--settings` is not supported. Codex supplies its own ID
+in `thread.started`; a bounded app-server metadata query can supply its path.
+A crash before an event is observed can leave no ID; an early stop, ephemeral
+session, or unavailable app-server can leave an ID without a path.
+
+For shallow copies retain `run.json` and
+`launches/<launch_id>/native-session.json` when present. Keep the native
+session store where it is; copying this receipt does not copy the log.
+This feature does not change stdout retention or recovery policy.
+
 ## Boundaries
 
 Separate output directories prevent accidental reuse of another launch's

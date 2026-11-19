@@ -10,7 +10,9 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
+from ._session_receipt import publish
 from .models import LaunchRecord, LaunchStatus, Request, launch_files_under
+from .native_session import bind_session
 from .outcomes import terminal_failure
 from .platform import OwnedProcess, resolve_command, start_process
 
@@ -56,7 +58,7 @@ def prepare(
         "launch_dir": launch_dir,
         "workdir": workdir,
     }
-    return paths, request.worker.command(paths)
+    return paths, bind_session(request.worker, launch_dir, workdir, request.worker.command(paths))
 
 
 def _cleanup_group(process: OwnedProcess) -> bool:
@@ -128,6 +130,7 @@ def launch(
             {},
         )
 
+    observed_id = None
     files = ExitStack()
     try:
         stdout = files.enter_context(stdout_path.open("wb"))
@@ -146,7 +149,22 @@ def launch(
             timed_out = False
             try:
                 on_started(process.pid, argv, started_at)
-                timed_out = not process.wait(request.timeout_seconds)
+                if (
+                    request.worker.track_native_session
+                    and request.worker.output_protocol == "codex-json"
+                ):
+                    from ._codex_session import wait_for_codex
+
+                    def pointer(session_id: str, path: Path | None) -> None:
+                        nonlocal observed_id
+                        observed_id = session_id
+                        publish(stdout_path.parent, "codex", session_id, path)
+
+                    timed_out = not wait_for_codex(
+                        process, request.timeout_seconds, stdout_path, pointer, argv, workdir, env
+                    )
+                else:
+                    timed_out = not process.wait(request.timeout_seconds)
             finally:
                 # Cleanup settles the whole owned group or raises, in which
                 # case the reservation stays unresolved.
@@ -155,6 +173,17 @@ def launch(
             process.close()
     finally:
         files.close()
+
+    if observed_id is not None and (timed_out or group_lingered):
+        # The worker must be stopped before spending time on an advisory lookup.
+        from ._codex_session import lookup_codex_path
+
+        try:
+            path = lookup_codex_path(observed_id, argv, workdir, env)
+            if path is not None:
+                publish(stdout_path.parent, "codex", observed_id, path)
+        except OSError:
+            pass
 
     status = LaunchStatus.DELIVERED
     problem, invalid_problem = _read_problem(paths["problem_file"])

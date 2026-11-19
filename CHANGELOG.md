@@ -6,10 +6,13 @@ so callers can update and decide whether existing run directories remain usable.
 
 ## Unreleased
 
+- Opt in to launch-bound native transcript pointers in the three harness adapters;
+  inspect them with `RunView.native_session()`. Run record version 3 records the
+  worker option. Version 2 is rejected; use a fresh run, not a migration.
 - Named input and output strings now preserve UTF-8 file line endings on new
   launches. Replay returns the string originally committed; it cannot recover
   line endings normalized by an older runtime. Use a fresh run when exact
-  bytes matter. The record format is unchanged.
+  bytes matter.
 
 ## 0.4.1 - 2026-11-16
 

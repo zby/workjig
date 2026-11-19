@@ -1,6 +1,6 @@
 """Run record schema: canonical request material, typed state and its JSON form.
 
-The persisted layout is ``run.json`` version 2. Loading validates every field
+The persisted layout is ``run.json`` version 3. Loading validates every field
 and every cross-record rule before the controller trusts the state; in memory
 the state is typed and is serialized again only when written.
 """
@@ -24,7 +24,7 @@ from .models import (
     thaw_json,
 )
 
-RECORD_VERSION = 2
+RECORD_VERSION = 3
 _LAUNCH_FIELDS = frozenset(item.name for item in fields(LaunchRecord))
 # Work material is every Request field that is neither the call key nor a
 # declared execution control, so a new field cannot be left out by mistake.

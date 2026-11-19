@@ -35,6 +35,7 @@ def codex_worker(
     *,
     sandbox: Literal["read-only", "workspace-write", "danger-full-access"],
     effort: str | None = None,
+    track_native_session: bool = False,
 ) -> CommandWorker:
     """Construct a Codex 0.162.1 noninteractive worker.
 
@@ -62,7 +63,12 @@ def codex_worker(
         _required_text(effort, "effort")
         argv.extend(("-c", f"model_reasoning_effort={effort}"))
     argv.append(_PROMPT_POINTER)
-    return CommandWorker(argv=tuple(argv), name="codex", output_protocol="codex-json")
+    return CommandWorker(
+        argv=tuple(argv),
+        name="codex",
+        output_protocol="codex-json",
+        track_native_session=track_native_session,
+    )
 
 
 def claude_worker(
@@ -70,6 +76,7 @@ def claude_worker(
     *,
     allowed_tools: tuple[str, ...],
     permission_mode: Literal["dontAsk", "acceptEdits"] = "dontAsk",
+    track_native_session: bool = False,
 ) -> CommandWorker:
     """Construct a Claude Code 2.1.303 one-shot worker.
 
@@ -98,6 +105,7 @@ def claude_worker(
         ),
         name="claude",
         output_protocol="claude-stream-json",
+        track_native_session=track_native_session,
     )
 
 
@@ -107,6 +115,7 @@ def pi_worker(
     provider: str,
     tools: tuple[str, ...],
     project_trust: Literal["approve", "no-approve"],
+    track_native_session: bool = False,
 ) -> CommandWorker:
     """Construct a Pi 1.3.0 one-shot worker.
 
@@ -129,12 +138,12 @@ def pi_worker(
             "--tools",
             _tool_list(tools),
             f"--{project_trust}",
-            "--session-dir",
-            "{launch_dir}",
+            *(("--session-dir", "{launch_dir}") if not track_native_session else ()),
             _PROMPT_POINTER,
         ),
         name="pi",
         output_protocol="pi-json",
+        track_native_session=track_native_session,
     )
 
 

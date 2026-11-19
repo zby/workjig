@@ -25,7 +25,7 @@ def state():
     material = request_material(request)
     reservation = LaunchRecord("launch", "reserved", "/private/launch", argv=("worker",))
     return {
-        "version": 2,
+        "version": 3,
         "workdir": "/private",
         "calls": {
             "job": {
@@ -150,6 +150,7 @@ def test_work_material_is_every_request_field_except_controls():
             "env": {"K": "V"},
             "evidence_file": None,
             "output_protocol": None,
+            "track_native_session": False,
         },
     }
     assert material_hash(request_material(request)) == material_hash(
