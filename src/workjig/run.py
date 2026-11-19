@@ -26,6 +26,7 @@ from .models import (
     Request,
     WorkjigError,
 )
+from .payloads import PayloadStore
 from .platform import sync_directory
 from .records import (
     CallEntry,
@@ -117,6 +118,7 @@ class Run:
         self._lock: RunLock | None = None
         self._state: RunState | None = None
         self._poisoned = False
+        self._payloads: PayloadStore
         self._mutex = threading.RLock()
         self._owned_launches: set[str] = set()
         self._active_calls: set[str] = set()
@@ -153,7 +155,8 @@ class Run:
             self._owned_launches.clear()
 
     def _load_or_create(self, lock: RunLock) -> RunState:
-        state = load_state(self.record_dir / "run.json")
+        self._payloads = PayloadStore(self.record_dir)
+        state = load_state(self.record_dir / "run.json", self._payloads)
         if state is not None:
             if state.workdir != str(self.workdir):
                 raise RecordError("run workdir differs from recorded workdir")
@@ -279,12 +282,14 @@ class Run:
                     if plan is None:
                         assert entry is not None
                         return self._result(entry, request, reused=True)
+                    if entry is not None:
+                        entry.verify_payloads(self._payloads)
                 if plan.backoff_seconds:
                     self._sleep(plan.backoff_seconds)
                 reserved, paths, argv = self._prepare_launch(request, plan.approved_stop)
                 with self._mutex:
                     self._assert_no_stale_launches()
-                    entry = self._ensure_open().entry(request, request_hash)
+                    entry = self._ensure_open().entry(request, request_hash, self._payloads)
                     may_have_reserved = True
                     self._reserve(entry, reserved)
                 attempt, outputs = launch(
@@ -356,7 +361,7 @@ class Run:
         """Settle the owned launch; a delivered outcome commits its outputs atomically."""
         entry.launches[-1] = attempt
         if attempt.status == LaunchStatus.DELIVERED:
-            entry.delivery = Delivery(outputs, attempt.launch_id, material_hash(outputs))
+            entry.delivery = Delivery.store(outputs, attempt.launch_id, self._payloads)
         self._write_state()
         self._owned_launches.remove(attempt.launch_id)
 

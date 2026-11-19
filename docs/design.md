@@ -59,6 +59,13 @@ proof that a readable or complete transcript exists. Workjig retains a compact
 locator, never copies a native transcript, and never uses it to settle or
 recover a launch. See [ADR 006](../adr/006-locate-native-sessions.md).
 
+The run manifest names immutable, run-local payloads for declared task, named
+inputs and delivered outputs. A SHA-256 reference identifies the exact UTF-8
+bytes, not a call or an approval. Payloads are durable before their references
+are committed. An unreferenced payload cannot establish delivery or authorize
+work; missing or damaged referenced bytes are record errors. Worker-facing files
+are independent materializations, not links to the payloads. See [ADR 007](../adr/007-normalize-call-payloads.md).
+
 Only complete, atomically committed result records are reusable. Workflow
 acceptance is separate: a resumed workflow reruns its checks against the
 intended input snapshot. It must not use changing sibling output state as an

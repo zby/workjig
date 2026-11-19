@@ -22,7 +22,15 @@ from workjig import (
     locking,
     read_run,
 )
-from workjig.records import Delivery, RunState, launch_to_json, material_hash, request_material
+from workjig.payloads import PayloadStore
+from workjig.records import (
+    CallEntry,
+    Delivery,
+    RunState,
+    material_hash,
+    request_material,
+    stored_material,
+)
 
 SRC = Path(__file__).resolve().parents[1] / "src"
 STAMP = "2026-01-01T00:00:00+00:00"
@@ -49,50 +57,31 @@ def _launch(launch_id: str, status: str, **updates: object) -> LaunchRecord:
     )
 
 
-def _entry(request: Request, launches: list[LaunchRecord], outputs: dict | None = None) -> dict:
-    result = None
-    if outputs is not None:
-        result = Delivery(outputs, launches[-1].launch_id, material_hash(outputs)).to_json()
-    return {
-        "request": request_material(request),
-        "attempts": [launch_to_json(launch) for launch in launches],
-        "result": result,
-    }
-
-
-def _write(records: Path, calls: dict[str, list[tuple[Request, dict]]]) -> None:
-    state = {
-        "version": 3,
-        "workdir": "/original/workdir",
-        "calls": {
-            call_id: {
-                material_hash(request_material(request)): entry for request, entry in versions
-            }
-            for call_id, versions in calls.items()
-        },
-    }
+def _write(records: Path, entries: list[tuple[Request, list[LaunchRecord], dict | None]]) -> None:
     records.mkdir(parents=True, exist_ok=True)
-    (records / "run.json").write_text(json.dumps(state), encoding="utf-8")
+    store = PayloadStore(records)
+    state = RunState("/original/workdir")
+    for request, launches, outputs in entries:
+        key = material_hash(request_material(request))
+        entry = CallEntry(request, key, stored_material(request, store), launches)
+        if outputs is not None:
+            entry.delivery = Delivery.store(outputs, launches[-1].launch_id, store)
+        state.calls.setdefault(request.call_id, {})[key] = entry
+    (records / "run.json").write_text(json.dumps(state.to_json()), encoding="utf-8")
 
 
 @pytest.fixture
 def records(tmp_path: Path) -> Path:
-    delivered, failed, pending = _request("delivered"), _request("failed"), _request("pending")
-    old, new = _request("versions", "Old task"), _request("versions", "New task")
     path = tmp_path / "records"
     _write(
         path,
-        {
-            "delivered": [
-                (delivered, _entry(delivered, [_launch("d1", "delivered")], {"answer.txt": "42"}))
-            ],
-            "failed": [(failed, _entry(failed, [_launch("f1", "process_error")]))],
-            "pending": [(pending, _entry(pending, [_launch("p1", "running")]))],
-            "versions": [
-                (old, _entry(old, [_launch("v1", "process_error")])),
-                (new, _entry(new, [_launch("v2", "reserved")])),
-            ],
-        },
+        [
+            (_request("delivered"), [_launch("d1", "delivered")], {"answer.txt": "42"}),
+            (_request("failed"), [_launch("f1", "process_error")], None),
+            (_request("pending"), [_launch("p1", "running")], None),
+            (_request("versions", "Old task"), [_launch("v1", "process_error")], None),
+            (_request("versions", "New task"), [_launch("v2", "reserved")], None),
+        ],
     )
     return path
 
@@ -217,11 +206,11 @@ def test_absent_record_is_none(tmp_path: Path) -> None:
     [
         "{not json",
         json.dumps({"version": 1, "workdir": "/w", "calls": {}}),
-        json.dumps({"version": 2, "workdir": "/w", "calls": {}}),
+        json.dumps({"version": 3, "workdir": "/w", "calls": {}}),
         b"\xff\xfe",
         "[" * 200_000,
     ],
-    ids=["not-json", "version-1", "version-2", "not-utf8", "nested-too-deeply"],
+    ids=["not-json", "version-1", "version-3", "not-utf8", "nested-too-deeply"],
 )
 @pytest.mark.unit
 def test_corrupt_or_unsupported_record_raises(tmp_path: Path, content: str | bytes) -> None:
@@ -233,11 +222,11 @@ def test_corrupt_or_unsupported_record_raises(tmp_path: Path, content: str | byt
 @pytest.mark.unit
 def test_entry_without_launches_is_rejected(tmp_path: Path) -> None:
     request = _request("job")
-    _write(tmp_path, {"job": [(request, _entry(request, []))]})
+    _write(tmp_path, [(request, [], None)])
     with pytest.raises(RecordError, match="no launches"):
         read_run(tmp_path)
     with pytest.raises(RecordError, match="no launches"):
-        RunState.from_json(json.loads((tmp_path / "run.json").read_text()))
+        RunState.from_json(json.loads((tmp_path / "run.json").read_text()), PayloadStore(tmp_path))
 
 
 @pytest.mark.subprocess

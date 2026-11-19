@@ -6,14 +6,16 @@ so callers can update and decide whether existing run directories remain usable.
 
 ## Unreleased
 
+- Record format 4 retains task/input/delivered text once per distinct UTF-8 payload
+  within each run. Copy `payloads/` with `run.json`; use fresh runs rather than
+  migrating older records. The request hash and public text views are unchanged.
 - Added Antigravity CLI (`agy` 1.5.12) adapter (`agy_worker`),
   `agy-stream-json` terminal-failure classification, `parse_evidence("agy", ...)`
   and native session tracking (`track_native_session=True`). See
   `docs/harness-evidence.md` for bounded probe evidence and limits.
 - Opt in to launch-bound native transcript pointers in the harness adapters
   (Codex, Claude Code, Pi and Antigravity CLI); inspect them with
-  `RunView.native_session()`. Run record version 3 records the worker option.
-  Version 2 is rejected; use a fresh run, not a migration.
+  `RunView.native_session()`.
 - Named input and output strings now preserve UTF-8 file line endings on new
   launches. Replay returns the string originally committed; it cannot recover
   line endings normalized by an older runtime. Use a fresh run when exact

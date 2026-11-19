@@ -231,6 +231,14 @@ fresh directory and launch allowances deliberately.
 
 ## Inspecting records
 
+Copy the manifest and its referenced `payloads/` together. For an active run,
+read or copy the manifest **first**, then its payloads: once published they are
+not replaced or collected by Workjig. `read_run()` verifies them under the
+supplied record directory and returns the original strings. Missing, invalid
+or hash-mismatched content raises `RecordError`; there is no fallback to launch
+files or to a store in the original location. Include the launch tree separately
+when retaining physical execution evidence. This format is for fresh runs.
+
 `read_run(record_dir)` returns a validated, immutable `RunView` of the
 committed `run.json` without taking the run lock, so status commands and
 audits can read while a controller works. It writes nothing and creates no
@@ -333,7 +341,7 @@ lookup outside that store, into the original or copied run, or to a file named
 for a different ID. A harness using an unsupported storage layout returns
 `unavailable`; the reader does not discover a replacement by scanning.
 
-For shallow copies retain `run.json` and
+For shallow copies retain `run.json`, its sibling `payloads/` directory, and
 `launches/<launch_id>/native-session.json` when present. Keep the native
 session store where it is; copying this receipt does not copy the log.
 This feature does not change stdout retention or recovery policy.

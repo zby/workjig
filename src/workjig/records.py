@@ -1,6 +1,6 @@
 """Run record schema: canonical request material, typed state and its JSON form.
 
-The persisted layout is ``run.json`` version 3. Loading validates every field
+The persisted layout is ``run.json`` version 4. Loading validates every field
 and every cross-record rule before the controller trusts the state; in memory
 the state is typed and is serialized again only when written.
 """
@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field, fields
+from functools import cache
 from pathlib import Path
 
 from .models import (
@@ -20,11 +21,11 @@ from .models import (
     LaunchStatus,
     Request,
     RetryPolicy,
-    WorkjigError,
     thaw_json,
 )
+from .payloads import PayloadStore, RecordError
 
-RECORD_VERSION = 3
+RECORD_VERSION = 4
 _LAUNCH_FIELDS = frozenset(item.name for item in fields(LaunchRecord))
 # Work material is every Request field that is neither the call key nor a
 # declared execution control, so a new field cannot be left out by mistake.
@@ -34,10 +35,6 @@ WORK_FIELDS = tuple(
     if item.name != "call_id" and not item.metadata.get("execution_control")
 )
 _WORKER_FIELDS = tuple(item.name for item in fields(CommandWorker))
-
-
-class RecordError(WorkjigError):
-    """A run record is absent, corrupt, or internally inconsistent."""
 
 
 def _plain(value: object) -> object:
@@ -54,6 +51,22 @@ def _plain(value: object) -> object:
 def request_material(request: Request) -> dict[str, object]:
     """Identity-bearing work material; execution controls are excluded."""
     return {name: _plain(getattr(request, name)) for name in WORK_FIELDS}
+
+
+def stored_material(request: Request, store: PayloadStore) -> dict[str, object]:
+    material = request_material(request)
+    put = cache(store.put)
+    material["task"] = put(request.task)
+    material["inputs"] = {name: put(text) for name, text in request.inputs.items()}
+    return material
+
+
+def _resolve_map(refs: object, get: Callable[[str], str]) -> dict[str, str]:
+    if not isinstance(refs, dict):
+        raise RecordError("invalid named payload references")
+    if not all(isinstance(name, str) and isinstance(ref, str) for name, ref in refs.items()):
+        raise RecordError("invalid named payload reference")
+    return {name: get(ref) for name, ref in refs.items()}
 
 
 def material_hash(material: Mapping[str, object]) -> str:
@@ -142,11 +155,21 @@ class Delivery:
     outputs: Mapping[str, str]
     launch_id: str
     content_hash: str
+    output_refs: dict[str, str]
+
+    @classmethod
+    def store(cls, outputs: dict[str, str], launch_id: str, store: PayloadStore) -> Delivery:
+        return cls(
+            outputs,
+            launch_id,
+            material_hash(outputs),
+            {name: store.put(text) for name, text in outputs.items()},
+        )
 
     def to_json(self) -> dict[str, object]:
         return {
             "status": LaunchStatus.DELIVERED.value,
-            "outputs": dict(self.outputs),
+            "outputs": self.output_refs,
             "launch_id": self.launch_id,
             "content_hash": self.content_hash,
         }
@@ -158,21 +181,31 @@ class CallEntry:
 
     request: Request
     request_hash: str
+    stored_request: dict[str, object]
     launches: list[LaunchRecord] = field(default_factory=list)
     delivery: Delivery | None = None
 
     def to_json(self) -> dict[str, object]:
         return {
-            "request": request_material(self.request),
+            "request": self.stored_request,
             "attempts": [launch_to_json(launch) for launch in self.launches],
             "result": self.delivery.to_json() if self.delivery is not None else None,
         }
 
     @classmethod
-    def from_json(cls, call_id: str, request_hash: str, value: object) -> CallEntry:
+    def from_json(
+        cls, call_id: str, request_hash: str, value: object, get: Callable[[str], str]
+    ) -> CallEntry:
         if not isinstance(value, dict) or set(value) != {"request", "attempts", "result"}:
             raise RecordError("invalid request record")
-        material = value["request"]
+        stored = value["request"]
+        if not isinstance(stored, dict) or not isinstance(stored.get("task"), str):
+            raise RecordError("invalid stored request")
+        material = {
+            **stored,
+            "task": get(stored["task"]),
+            "inputs": _resolve_map(stored.get("inputs"), get),
+        }
         request = _request_from_material(call_id, material)
         if material_hash(material) != request_hash:
             raise RecordError("request hash mismatch")
@@ -187,17 +220,24 @@ class CallEntry:
                 not isinstance(result, dict)
                 or set(result) != {"status", "outputs", "launch_id", "content_hash"}
                 or result["status"] != LaunchStatus.DELIVERED
-                or not isinstance(result["outputs"], dict)
-                or not all(
-                    isinstance(k, str) and isinstance(v, str) for k, v in result["outputs"].items()
-                )
-                or result["content_hash"] != material_hash(result["outputs"])
             ):
                 raise RecordError("invalid delivered result record")
-            delivery = Delivery(result["outputs"], result["launch_id"], result["content_hash"])
-        entry = cls(request, request_hash, launches, delivery)
+            outputs = _resolve_map(result["outputs"], get)
+            if material_hash(outputs) != result["content_hash"]:
+                raise RecordError("invalid delivered result hash")
+            delivery = Delivery(
+                outputs, result["launch_id"], result["content_hash"], result["outputs"]
+            )
+        entry = cls(request, request_hash, stored, launches, delivery)
         entry.check_history()
         return entry
+
+    def verify_payloads(self, store: PayloadStore) -> None:
+        get = cache(store.get)
+        get(self.stored_request["task"])
+        _resolve_map(self.stored_request["inputs"], get)
+        if self.delivery is not None:
+            _resolve_map(self.delivery.output_refs, get)
 
     @property
     def status(self) -> LaunchStatus:
@@ -266,12 +306,12 @@ class RunState:
     def find(self, call_id: str, request_hash: str) -> CallEntry | None:
         return self.calls.get(call_id, {}).get(request_hash)
 
-    def entry(self, request: Request, request_hash: str) -> CallEntry:
+    def entry(self, request: Request, request_hash: str, store: PayloadStore) -> CallEntry:
         """Return the history for this work material, creating an empty one."""
-        versions = self.calls.setdefault(request.call_id, {})
-        existing = versions.get(request_hash)
+        existing = self.find(request.call_id, request_hash)
         if existing is None:
-            existing = versions[request_hash] = CallEntry(request, request_hash)
+            existing = CallEntry(request, request_hash, stored_material(request, store))
+            self.calls.setdefault(request.call_id, {})[request_hash] = existing
         return existing
 
     def launches(self) -> Iterator[tuple[CallEntry, int]]:
@@ -298,7 +338,7 @@ class RunState:
         }
 
     @classmethod
-    def from_json(cls, value: object) -> RunState:
+    def from_json(cls, value: object, store: PayloadStore) -> RunState:
         if (
             not isinstance(value, dict)
             or set(value) != {"version", "workdir", "calls"}
@@ -310,12 +350,13 @@ class RunState:
             raise RecordError("invalid run record structure or version")
         calls: dict[str, dict[str, CallEntry]] = {}
         seen: set[str] = set()
+        get = cache(store.get)  # Resolve each distinct payload once per manifest snapshot.
         for call_id, versions in value["calls"].items():
             if not isinstance(call_id, str) or not isinstance(versions, dict):
                 raise RecordError("invalid call record")
             entries: dict[str, CallEntry] = {}
             for request_hash, raw in versions.items():
-                entry = CallEntry.from_json(call_id, request_hash, raw)
+                entry = CallEntry.from_json(call_id, request_hash, raw, get)
                 for launch in entry.launches:
                     if launch.launch_id in seen:
                         raise RecordError("duplicate launch id")
@@ -325,7 +366,7 @@ class RunState:
         return cls(workdir=value["workdir"], calls=calls)
 
 
-def load_state(path: Path) -> RunState | None:
+def load_state(path: Path, store: PayloadStore) -> RunState | None:
     """Read and validate ``run.json``; None when the file does not exist."""
     try:
         text = path.read_text(encoding="utf-8")
@@ -334,7 +375,7 @@ def load_state(path: Path) -> RunState | None:
     except (OSError, UnicodeError) as error:
         raise RecordError(f"cannot read run record: {error}") from error
     try:
-        return RunState.from_json(json.loads(text))
+        return RunState.from_json(json.loads(text), store)
     # Deeply nested JSON exhausts the parser's stack rather than failing to parse.
     except (TypeError, ValueError, RecursionError) as error:
         raise RecordError(f"cannot read run record: {error}") from error

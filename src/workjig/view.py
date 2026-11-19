@@ -16,6 +16,7 @@ from .models import (
     launch_files_under,
 )
 from .native_session import NativeSession, locate_session
+from .payloads import PayloadStore
 from .records import WORK_FIELDS, CallEntry, load_state
 
 
@@ -116,7 +117,7 @@ def read_run(record_dir: str | Path) -> RunView | None:
     directory is reported, not checked.
     """
     root = Path(record_dir).resolve()
-    state = load_state(root / "run.json")
+    state = load_state(root / "run.json", PayloadStore(root))
     if state is None:
         return None
     return RunView(
