@@ -16,7 +16,7 @@ from threading import Event
 from typing import BinaryIO
 
 from . import _session_guard, _session_receipt, _windows
-from ._session_observer import _CHUNK, _UUID, EventObserver, _object, observe_stdout
+from ._session_observer import _CHUNK, _UUID, _object, observe_stdout
 from .platform import OwnershipError, resolve_command
 
 _REPLY_LIMIT = 256 * 1024
@@ -32,13 +32,6 @@ def _codex_id(event: dict) -> str | None:
     ):
         return native_id
     return None
-
-
-class _Events(EventObserver):
-    """Frame Codex JSONL records and extract canonical thread.started IDs."""
-
-    def __init__(self) -> None:
-        super().__init__(_codex_id)
 
 
 def _messages(reader: BinaryIO, deadline: float) -> Iterator[dict]:
