@@ -83,15 +83,15 @@ class RunView:
             if launch.status in UNSETTLED_STATUSES
         )
 
-    def native_session(self, launch: LaunchRecord) -> NativeSession:
-        """Inspect the recorded native session pointer without starting a harness."""
-        call, recorded, directory = self._launch_location(launch)
-        return locate_session(call.worker, recorded, directory)
+    def native_session(self, launch: LaunchRecord, *, resolve: bool = False) -> NativeSession:
+        """Locate this attempt's native transcript, without reading it.
 
-    def resolve_native_session(self, launch: LaunchRecord) -> NativeSession:
-        """Locate this attempt's transcript, querying the harness when needed."""
+        By default this starts no process. When the receipt holds an ID whose
+        transcript only the harness can report, it raises
+        ``UnresolvedSessionError``; pass ``resolve=True`` to ask the harness.
+        """
         call, recorded, directory = self._launch_location(launch)
-        return locate_session(call.worker, recorded, directory, resolve=True)
+        return locate_session(call.worker, recorded, directory, resolve=resolve)
 
     def launch_files(self, launch: LaunchRecord) -> LaunchFiles:
         """Locations of a launch's files under this view's record directory.

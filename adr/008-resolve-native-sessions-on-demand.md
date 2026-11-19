@@ -12,7 +12,7 @@ instructions across workflows.
 
 Keep the observed thread ID in the Codex receipt. The controller can settle
 the worker independently of transcript availability. The common audit entry
-point is `RunView.resolve_native_session(launch)`. A recorded location goes
+point is `RunView.native_session(launch, resolve=True)`. A recorded location goes
 through the existing store and file checks. For an ID-only Codex receipt,
 the reader queries the exact thread under the pinned store and applies the
 same checks to the reply. The helper uses the reader's Codex installation
@@ -22,8 +22,11 @@ to execute nor an environment to replay.
 
 Resolution returns the existing session status and reason on lookup or
 cleanup failure. Each call can observe changes to the external store.
-There is no writeback. Passive inspection through `native_session` still
-requires only the records and filesystem. Revisit the helper if Codex adds
+There is no writeback. Without `resolve=True` the same method requires only
+the records and filesystem and starts nothing. When it finds an ID whose
+transcript only the harness can report, it raises `UnresolvedSessionError`
+naming the parameter, so an undetermined answer is never mistaken for an
+unavailable transcript. Revisit the helper if Codex adds
 a transcript path to the worker's public output.
 
 ## Accepted limits
@@ -34,4 +37,5 @@ a transcript path to the worker's public output.
   established. Resolve only runs and stores the reader trusts.
 - A Codex `sessions` directory that is a symlink is reported as unavailable,
   because its target's parent would otherwise be taken for the Codex home.
-- `native_session` never yields a Codex transcript path; only resolution does.
+- Without `resolve=True`, a Codex launch with a known ID raises instead of
+  yielding a path.

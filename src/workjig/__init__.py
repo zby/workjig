@@ -11,7 +11,7 @@ from .models import (
     RetryPolicy,
     WorkjigError,
 )
-from .native_session import NativeSession
+from .native_session import NativeSession, UnresolvedSessionError
 from .records import RecordError
 from .run import Run, UncertainLaunchError
 from .view import RecordedCall, RunView, read_run
@@ -34,5 +34,6 @@ __all__ = [
     "busy",
     "read_run",
     "UncertainLaunchError",
+    "UnresolvedSessionError",
     "WorkjigError",
 ]

@@ -234,7 +234,7 @@ increase the total ceiling and update retry policy to authorize continuation,
 but already spent launches remain spent. Otherwise start a new run deliberately.
 
 Corrupt records raise `RecordError`. `RecordError`, `UncertainLaunchError` and
-`RunBusyError` all derive from `WorkjigError`. A persistence failure can poison the
+`RunBusyError` all derive from `WorkjigError`, as does `UnresolvedSessionError`. A persistence failure can poison the
 current controller: close and reopen it before inspection or recovery. Never
 delete a reservation merely to suppress uncertainty.
 An exception or keyboard interruption after reservation also requires explicit
@@ -312,7 +312,7 @@ identity. No Commonplace wrapper is needed.
 
 ```python
 for launch in call.launches:
-    session = view.resolve_native_session(launch)
+    session = view.native_session(launch, resolve=True)
     if session.status == "located":
         audit(session.path)  # caller policy; the file can still change or disappear
     else:
@@ -323,12 +323,14 @@ for launch in call.launches:
 `unavailable` means the ID is known but there is no safely resolved file.
 `source` is `assigned` (Pi/Claude) or `observed` (Codex/Antigravity CLI) for a
 known ID.
-Use `view.native_session(launch)` to inspect the receipt and check any
-recorded location without starting a harness. Both methods return a
-`NativeSession` and check current files, so a repeat call can see a new
-receipt or a deleted transcript. Neither method writes to the run or takes
-its lock. Only inspect trusted runs and stores. The caller decides whether
-to open the returned path.
+Without `resolve=True` the lookup starts no process. If the receipt holds an
+ID whose transcript only the harness can report, it raises
+`UnresolvedSessionError`, which carries `harness` and `session_id` and says
+to pass `resolve=True`. Today that applies to Codex. Every lookup checks
+current files, so a repeat call can see a new receipt or a deleted
+transcript. It never writes to the run or takes its lock. Only inspect
+trusted runs and stores. The caller decides whether to open the returned
+path.
 
 Tracked Pi uses a fresh directory under `PI_CODING_AGENT_SESSION_DIR`
 (default: the agent's sessions root), outside the run. Claude reports its
@@ -336,7 +338,7 @@ path via a per-launch `SessionStart` hook; disabling hooks can leave a known
 ID without a path. Workjig supplies the hook settings; combining with a
 second explicit `--settings` is not supported. Codex supplies its own ID
 in `thread.started`. The controller records that ID during execution.
-For an ID-only Codex receipt, `resolve_native_session` makes one bounded
+For an ID-only Codex receipt, `resolve=True` makes one bounded
 metadata query for the exact ID using the reader's `codex` on PATH, with
 `CODEX_HOME` set to the parent of the pinned sessions directory. The helper
 runs in a temporary working directory. The reader needs access to the
