@@ -199,13 +199,19 @@ def _stop_group(proc: subprocess.Popen) -> None:
 
 
 @contextmanager
-def capture_codex(stdout_path: Path, argv: tuple[str, ...], cwd: Path, env: Mapping[str, str]):
+def capture_codex(
+    stdout: Path | BinaryIO,
+    launch_dir: Path,
+    argv: tuple[str, ...],
+    cwd: Path,
+    env: Mapping[str, str],
+):
     """Observe alongside the worker; leave this context only after group cleanup."""
     stopped = Event()
 
     def publish(native_id: str, path: Path | None) -> None:
         try:
-            _session_receipt.publish(stdout_path.parent, "codex", native_id, path)
+            _session_receipt.publish(launch_dir, "codex", native_id, path)
         except OSError:
             pass  # Optional evidence; never change the worker outcome.
 
@@ -220,7 +226,7 @@ def capture_codex(stdout_path: Path, argv: tuple[str, ...], cwd: Path, env: Mapp
         return True
 
     def observe() -> str | None:
-        native_id = observe_stdout(stdout_path, stopped, _codex_id, lambda nid: publish(nid, None))
+        native_id = observe_stdout(stdout, stopped, _codex_id, lambda nid: publish(nid, None))
         if native_id and not stopped.is_set() and locate(native_id):
             return None
         return native_id

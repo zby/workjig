@@ -187,7 +187,7 @@ def test_crash_after_approval_reservation_requires_recovery(job, monkeypatch):
     module = importlib.import_module("workjig.run")
     original = module.launch
 
-    def interrupt(*args):
+    def interrupt(*args, **kwargs):
         raise KeyboardInterrupt
 
     monkeypatch.setattr(module, "launch", interrupt)

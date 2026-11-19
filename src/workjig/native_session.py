@@ -13,7 +13,7 @@ from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Event
-from typing import Literal
+from typing import BinaryIO, Literal
 from uuid import UUID
 
 from . import _session_receipt
@@ -173,14 +173,14 @@ def _agy_id(event: dict) -> str | None:
 
 
 @contextmanager
-def capture_agy(stdout_path: Path, root: Path) -> Iterator[None]:
+def capture_agy(stdout: Path | BinaryIO, launch_dir: Path, root: Path) -> Iterator[None]:
     """Observe agy's init event alongside the worker; join only after settlement."""
     stopped = Event()
 
     def publish(native_id: str) -> None:
         try:
             _session_receipt.publish(
-                stdout_path.parent,
+                launch_dir,
                 "agy",
                 native_id,
                 root.joinpath(native_id, *_AGY_TRANSCRIPT),
@@ -189,7 +189,7 @@ def capture_agy(stdout_path: Path, root: Path) -> Iterator[None]:
             pass  # Optional evidence; never change the worker outcome.
 
     with ThreadPoolExecutor(max_workers=1) as pool:
-        observation = pool.submit(observe_stdout, stdout_path, stopped, _agy_id, publish)
+        observation = pool.submit(observe_stdout, stdout, stopped, _agy_id, publish)
         try:
             yield
         finally:
@@ -198,17 +198,27 @@ def capture_agy(stdout_path: Path, root: Path) -> Iterator[None]:
 
 
 def _capture_codex(
-    stdout_path: Path, command: tuple[str, ...], cwd: Path, env: Mapping[str, str], root: Path
+    stdout: Path | BinaryIO,
+    launch_dir: Path,
+    command: tuple[str, ...],
+    cwd: Path,
+    env: Mapping[str, str],
+    root: Path,
 ) -> AbstractContextManager[None]:
     from ._codex_session import capture_codex
 
-    return capture_codex(stdout_path, command, cwd, env)
+    return capture_codex(stdout, launch_dir, command, cwd, env)
 
 
 def _capture_agy(
-    stdout_path: Path, command: tuple[str, ...], cwd: Path, env: Mapping[str, str], root: Path
+    stdout: Path | BinaryIO,
+    launch_dir: Path,
+    command: tuple[str, ...],
+    cwd: Path,
+    env: Mapping[str, str],
+    root: Path,
 ) -> AbstractContextManager[None]:
-    return capture_agy(stdout_path, root)
+    return capture_agy(stdout, launch_dir, root)
 
 
 # -- the per-harness table -----------------------------------------------------
@@ -230,7 +240,8 @@ class _Harness:
     transcript: Callable[[Path, str, Path], Path]
     capture: (
         Callable[
-            [Path, tuple[str, ...], Path, Mapping[str, str], Path], AbstractContextManager[None]
+            [Path | BinaryIO, Path, tuple[str, ...], Path, Mapping[str, str], Path],
+            AbstractContextManager[None],
         ]
         | None
     ) = None
@@ -276,9 +287,15 @@ def bind_session(
     return harness.bind(argv, launch, root), root
 
 
+def observes_session(worker: CommandWorker) -> bool:
+    """Does this worker need a live reader independent of its stdout writer?"""
+    return worker.track_native_session and _HARNESS[worker.output_protocol].capture is not None
+
+
 def capture_session(
     worker: CommandWorker,
-    stdout_path: Path,
+    stdout: Path | BinaryIO,
+    launch_dir: Path,
     command: tuple[str, ...],
     cwd: Path,
     env: Mapping[str, str],
@@ -291,7 +308,7 @@ def capture_session(
     if not worker.track_native_session or root is None:
         return nullcontext()
     capture = _HARNESS[worker.output_protocol].capture
-    return capture(stdout_path, command, cwd, env, root) if capture else nullcontext()
+    return capture(stdout, launch_dir, command, cwd, env, root) if capture else nullcontext()
 
 
 def _read_receipt(launch: Path) -> object:

@@ -110,15 +110,19 @@ class Run:
         record_dir: str | Path,
         workdir: str | Path,
         *,
+        retain_logs: bool = True,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
+        if type(retain_logs) is not bool:
+            raise ValueError("retain_logs must be a boolean")
+        self._retain_logs = retain_logs
         self.record_dir = Path(record_dir).resolve()
         self.workdir = Path(workdir).resolve()
+        self._payloads: PayloadStore
         self._sleep = sleep
         self._lock: RunLock | None = None
         self._state: RunState | None = None
         self._poisoned = False
-        self._payloads: PayloadStore
         self._mutex = threading.RLock()
         self._owned_launches: set[str] = set()
         self._active_calls: set[str] = set()
@@ -278,12 +282,12 @@ class Run:
                     state = self._ensure_open()
                     self._assert_no_stale_launches()
                     entry = state.find(request.call_id, request_hash)
+                    if entry is not None:
+                        entry.verify_payloads(self._payloads)
                     plan = _plan_launch(entry, request, resume_usage_stop)
                     if plan is None:
                         assert entry is not None
                         return self._result(entry, request, reused=True)
-                    if entry is not None:
-                        entry.verify_payloads(self._payloads)
                 if plan.backoff_seconds:
                     self._sleep(plan.backoff_seconds)
                 reserved, paths, argv = self._prepare_launch(request, plan.approved_stop)
@@ -299,6 +303,7 @@ class Run:
                     argv,
                     reserved,
                     partial(self._mark_running, entry, reserved),
+                    retain_logs=self._retain_logs,
                 )
                 with self._mutex:
                     self._commit(entry, attempt, outputs)

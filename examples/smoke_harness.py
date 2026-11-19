@@ -17,7 +17,7 @@ DEFAULT_MODELS = {
 }
 
 
-def probe(harness: str, workdir: Path, model: str) -> dict[str, object]:
+def probe(harness: str, workdir: Path, model: str, *, verbose: bool = True) -> dict[str, object]:
     workdir.mkdir(parents=True, exist_ok=True)
     if harness == "codex":
         worker = codex_worker(model, sandbox="workspace-write", effort="low")
@@ -49,7 +49,7 @@ def probe(harness: str, workdir: Path, model: str) -> dict[str, object]:
         "requested_model": model,
         "records": str(workdir / "records"),
     }
-    with Run(workdir / "records", workdir) as run:
+    with Run(workdir / "records", workdir, retain_logs=verbose) as run:
         result = run.call(request)
         report.update(status=result.status, launches=len(result.launches))
         if result.status != "delivered":
@@ -63,13 +63,12 @@ def probe(harness: str, workdir: Path, model: str) -> dict[str, object]:
             and repeated.launches[-1].launch_id == result.launches[-1].launch_id
         ):
             raise ValueError("repeat call did not reuse the committed launch")
-    attempt = result.launches[-1]
+    stdout = Path(result.launches[-1].launch_dir) / "stdout.log"
     report.update(
         reused=repeated.reused,
-        evidence=parse_evidence(
-            harness,
-            (Path(attempt.launch_dir) / "stdout.log").read_text(encoding="utf-8"),
-        ),
+        evidence=parse_evidence(harness, stdout.read_text(encoding="utf-8"))
+        if verbose and stdout.is_file()
+        else None,
     )
     return report
 
@@ -78,6 +77,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("harness", choices=(*DEFAULT_MODELS, "all"))
     parser.add_argument("workdir", type=Path)
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="retain worker stdout and stderr logs (default: on)",
+    )
     parser.add_argument(
         "--model",
         help=(
@@ -95,7 +101,7 @@ def main() -> None:
         workdir = root / harness if args.harness == "all" else root
         model = args.model if args.model is not None else DEFAULT_MODELS[harness]
         try:
-            report = probe(harness, workdir, model)
+            report = probe(harness, workdir, model, verbose=args.verbose)
         except Exception as exc:
             report = {
                 "harness": harness,

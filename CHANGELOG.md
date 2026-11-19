@@ -6,6 +6,8 @@ so callers can update and decide whether existing run directories remain usable.
 
 ## Unreleased
 
+- `Run(..., retain_logs=True)` retains launch stdout and stderr by default. Set it
+  to `False` (smoke CLI: `--no-verbose`) to omit both raw logs on new launches.
 - Record format 4 retains task/input/delivered text once per distinct UTF-8 payload
   within each run. Copy `payloads/` with `run.json`; use fresh runs rather than
   migrating older records. The request hash and public text views are unchanged.

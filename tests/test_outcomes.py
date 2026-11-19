@@ -65,9 +65,9 @@ def request(protocol, stream, *, code=0, behavior="exit", problem=None):
     )
 
 
-def check(tmp_path, req, status):
+def check(tmp_path, req, status, **run_options):
     records = tmp_path / "records"
-    with Run(records, tmp_path) as run:
+    with Run(records, tmp_path, **run_options) as run:
         result = run.call(req)
     assert result.status == status
     assert dict(result.outputs) == ({"answer.txt": "candidate"} if status == "delivered" else {})
@@ -92,8 +92,9 @@ def test_retained_cli_streams_classify(case):
 
 
 @pytest.mark.parametrize("case", ["codex-quota", "claude-recover", "pi-auth", "pi-quota"])
+@pytest.mark.parametrize("retain_logs", [True, False])
 @pytest.mark.subprocess
-def test_adapter_outcomes_retry_and_replay(tmp_path, case):
+def test_adapter_outcomes_retry_and_replay(tmp_path, case, retain_logs):
     fixture = CAPTURES / case
     observed = json.loads((fixture / "result.json").read_text())
     harness = observed["harness"]
@@ -112,20 +113,40 @@ def test_adapter_outcomes_retry_and_replay(tmp_path, case):
     worker = replace(factories[harness](), argv=req.worker.argv, name="renamed-display")
     req = replace(req, worker=worker, retry=RetryPolicy(on=("process_error",)))
     expected = expected_status(observed["scenario"])
-    result = check(tmp_path, req, expected)
+    result = check(tmp_path, req, expected, retain_logs=retain_logs)
     assert all(launch.returncode == observed["returncode"] for launch in result.launches)
     # Cover each factory and runtime outcome, including Pi's exit-zero errors.
     # Stream variations are tested directly, without repeating this lifecycle.
     count = 2 if expected == "process_error" else 1
     assert len(result.launches) == count
     assert result.failed_at_launch_limit == (expected == "process_error")
-    with Run(tmp_path / "records", tmp_path) as run:
+    with Run(tmp_path / "records", tmp_path, retain_logs=not retain_logs) as run:
         replay = run.call(req)
     assert replay.reused
     assert replay.launches == result.launches
     assert replay.status == result.status
     assert dict(replay.outputs) == dict(result.outputs)
     assert (tmp_path / "starts").read_text().splitlines() == ["start"] * count
+    for attempt in result.launches:
+        for name in ("stdout.log", "stderr.log"):
+            assert (Path(attempt.launch_dir) / name).is_file() == retain_logs
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("value", [None, 0, 1, "false"])
+def test_retain_logs_requires_bool(tmp_path, value):
+    with pytest.raises(ValueError, match="retain_logs"):
+        Run(tmp_path / "records", tmp_path, retain_logs=value)
+
+
+@pytest.mark.subprocess
+def test_start_failure_without_log_retention(tmp_path):
+    req = request("codex-json", "")
+    worker = replace(req.worker, argv=(str(tmp_path / "missing"),), track_native_session=True)
+    result = check(tmp_path, replace(req, worker=worker), "launch_error", retain_logs=False)
+    launch = Path(result.launches[0].launch_dir)
+    assert not (launch / "stdout.log").exists()
+    assert not (launch / "stderr.log").exists()
 
 
 def jsonl(*records):

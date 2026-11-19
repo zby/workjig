@@ -132,7 +132,7 @@ without `--dangerously-skip-permissions`.
 
 Codex, Pi, Claude and Antigravity CLI (`agy`) have each passed a bounded real
 file-copy probe and reuse check.
-Their raw event streams remain in each launch's `stdout.log`. The standalone
+By default their raw event streams remain in each launch's `stdout.log`. The standalone
 `parse_evidence(harness, stdout_text)` helper extracts available session and
 model fields; it does not infer the served model from the requested model.
 For Claude result records, it preserves the reported `modelUsage` mapping as
@@ -147,6 +147,20 @@ classification. A generic
 its display `name` never selects a parser. Protocol selection is part of request
 identity, so adding it to an existing request creates a different identity,
 not a continuation of the old launch allowance.
+
+### Optional raw launch logs
+
+`Run(records, workdir, retain_logs=True)` is the default. Set `retain_logs=False`
+to omit **both** `stdout.log` and `stderr.log` on new launches, including
+failed or timed-out ones. Generic command streams are discarded; when a harness
+protocol needs stdout, Workjig can spool it to a temporary file for terminal
+classification and session-ID observation. Off means *not retained*, not *never
+written to disk*. File outputs, execution outcomes, and native transcript policy
+do not change. Consumers that parse a raw log after delivery must opt to retain
+it. The setting is not work identity or allowance: replay neither relaunches a
+worker nor creates or deletes prior logs. `examples/smoke_harness.py` exposes
+`-v` / `--verbose` (default on) and `--no-verbose`; it controls file retention,
+not streaming progress to the terminal.
 
 ## Outcomes and recovery
 
@@ -344,7 +358,7 @@ for a different ID. A harness using an unsupported storage layout returns
 For shallow copies retain `run.json`, its sibling `payloads/` directory, and
 `launches/<launch_id>/native-session.json` when present. Keep the native
 session store where it is; copying this receipt does not copy the log.
-This feature does not change stdout retention or recovery policy.
+Native-session lookup does not require retained stdout and does not change recovery policy.
 
 ## Boundaries
 

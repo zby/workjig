@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
-import os
 import re
-import stat
 from collections.abc import Callable
+from contextlib import ExitStack
 from pathlib import Path
 from threading import Event
+from typing import BinaryIO
+
+from .outcomes import stdout_reader
 
 _UUID = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}")
 _CHUNK = 64 * 1024
@@ -48,7 +50,7 @@ class EventObserver:
 
 
 def observe_stdout(
-    stdout_path: Path,
+    stdout: Path | BinaryIO,
     stopped: Event,
     extract: Callable[[dict], str | None],
     publish: Callable[[str], None],
@@ -56,17 +58,10 @@ def observe_stdout(
     """Tail a regular stdout file until an ID is extracted or settlement stops."""
     events = EventObserver(extract)
     final_bytes = 1024 * 1024
-    # Read only a regular launch log. A replaced FIFO must not stall settlement.
-    try:
-        if stdout_path.is_symlink() or not stdout_path.is_file():
-            return None
-        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
-        flags |= getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
-        stream = os.fdopen(os.open(stdout_path, flags), "rb")
-    except OSError:
-        return None
-    with stream:
-        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+    with ExitStack() as files:
+        try:
+            stream = files.enter_context(stdout_reader(stdout))
+        except (OSError, ValueError):
             return None
         while True:
             final = stopped.is_set()

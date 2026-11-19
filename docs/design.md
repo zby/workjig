@@ -66,6 +66,10 @@ are committed. An unreferenced payload cannot establish delivery or authorize
 work; missing or damaged referenced bytes are record errors. Worker-facing files
 are independent materializations, not links to the payloads. See [ADR 007](../adr/007-normalize-call-payloads.md).
 
+Raw launch stdout and stderr are retained by default. Disabling their retention
+applies only to new launches; it does not disable live protocol evidence,
+change the terminal classification or alter work identity.
+
 Only complete, atomically committed result records are reusable. Workflow
 acceptance is separate: a resumed workflow reruns its checks against the
 intended input snapshot. It must not use changing sibling output state as an

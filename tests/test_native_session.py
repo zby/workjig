@@ -6,6 +6,7 @@ import shutil
 import sys
 import time
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -97,7 +98,8 @@ def test_lookup_after_timeout_retry_and_shallow_copy(tmp_path, adapter):
 
 
 @pytest.mark.subprocess
-def test_codex_timeout_and_retry_resolve_distinct_native_ids(tmp_path):
+@pytest.mark.parametrize("retain_logs", [True, False])
+def test_codex_timeout_and_retry_resolve_distinct_native_ids(tmp_path, retain_logs):
     external = tmp_path / "native" / "sessions"
     external.mkdir(parents=True)
     script = tmp_path / "exec.py"
@@ -105,8 +107,14 @@ def test_codex_timeout_and_retry_resolve_distinct_native_ids(tmp_path):
 import json, os, sys, time, uuid
 from pathlib import Path
 sid = str(uuid.uuid4())
+launch = Path(sys.argv[-1]).parent
+for name in ('stdout.log', 'stderr.log'):
+    assert (launch / name).is_file() == (os.environ['RETAIN_LOGS'] == 'True')
 (Path(os.environ['STORE']) / (sid + '.jsonl')).touch()
 print(json.dumps({'type': 'thread.started', 'thread_id': sid}), flush=True)
+while not (launch / 'native-session.json').exists():
+    time.sleep(.01)
+print('diagnostic', file=sys.stderr, flush=True)
 if not Path('first').exists():
     Path('first').touch()
     time.sleep(30)
@@ -128,7 +136,11 @@ print(json.dumps({'id': req['id'], 'result': {'thread': thread}}), flush=True)
     worker = replace(
         codex_worker("test", sandbox="read-only", track_native_session=True),
         argv=(sys.executable, str(script), "{output_dir}"),
-        env={"STORE": str(external), "CODEX_HOME": str(external.parent)},
+        env={
+            "STORE": str(external),
+            "CODEX_HOME": str(external.parent),
+            "RETAIN_LOGS": str(retain_logs),
+        },
     )
     req = Request(
         call_id="copy",
@@ -140,7 +152,7 @@ print(json.dumps({'id': req['id'], 'result': {'thread': thread}}), flush=True)
         retry=RetryPolicy(on=("timeout",)),
         timeout_seconds=1.5,
     )
-    with Run(tmp_path / "run", tmp_path) as run:
+    with Run(tmp_path / "run", tmp_path, retain_logs=retain_logs) as run:
         result = run.call(req)
     assert [x.status for x in result.launches] == ["timeout", "delivered"]
     archive = tmp_path / "archive"
@@ -235,7 +247,8 @@ def test_generic_command_cannot_enable_tracking_without_protocol():
 
 
 @pytest.mark.subprocess
-def test_agy_timeout_and_retry_resolve_distinct_native_ids(tmp_path):
+@pytest.mark.parametrize("retain_logs", [True, False])
+def test_agy_timeout_and_retry_resolve_distinct_native_ids(tmp_path, retain_logs):
     home = tmp_path / "agy-home"
     brain = home / ".gemini" / "antigravity-cli" / "brain"
     brain.mkdir(parents=True)
@@ -245,6 +258,8 @@ import json, os, sys, time, uuid
 from pathlib import Path
 sid = str(uuid.uuid4())
 home = Path(os.environ['USERPROFILE' if os.name == 'nt' else 'HOME'])
+for name in ('stdout.log', 'stderr.log'):
+    assert (Path(sys.argv[-1]).parent / name).exists() == (os.environ['RETAIN_LOGS'] == 'True')
 logs = home / '.gemini' / 'antigravity-cli' / 'brain' / sid / '.system_generated' / 'logs'
 transcript = logs / 'transcript.jsonl'
 transcript.parent.mkdir(parents=True, exist_ok=True)
@@ -260,7 +275,7 @@ print(json.dumps({'event': 'result', 'result': {'conversation_id': sid, 'status'
     worker = replace(
         agy_worker("test", track_native_session=True),
         argv=(sys.executable, str(script), "{output_dir}"),
-        env={home_var: str(home)},
+        env={home_var: str(home), "RETAIN_LOGS": str(retain_logs)},
     )
     req = Request(
         call_id="copy",
@@ -272,9 +287,12 @@ print(json.dumps({'event': 'result', 'result': {'conversation_id': sid, 'status'
         retry=RetryPolicy(on=("timeout",)),
         timeout_seconds=1.5,
     )
-    with Run(tmp_path / "run", tmp_path) as run:
+    with Run(tmp_path / "run", tmp_path, retain_logs=retain_logs) as run:
         result = run.call(req)
     assert [x.status for x in result.launches] == ["timeout", "delivered"]
+    for attempt in result.launches:
+        for name in ("stdout.log", "stderr.log"):
+            assert (Path(attempt.launch_dir) / name).is_file() == retain_logs
     archive = tmp_path / "archive"
     shutil.copytree(tmp_path / "run", archive, ignore=shutil.ignore_patterns("*.log"))
     shutil.rmtree(tmp_path / "run")
