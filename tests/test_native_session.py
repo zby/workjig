@@ -10,7 +10,15 @@ from pathlib import Path
 
 import pytest
 
-from workjig import CommandWorker, Request, RetryPolicy, Run, _session_receipt, read_run
+from workjig import (
+    CommandWorker,
+    Request,
+    RetryPolicy,
+    Run,
+    UnresolvedSessionError,
+    _session_receipt,
+    read_run,
+)
 from workjig.adapters import agy_worker, claude_worker, codex_worker, pi_worker
 
 FAKE = """\
@@ -93,7 +101,7 @@ def test_lookup_after_timeout_retry_and_shallow_copy(tmp_path, adapter):
     a.path.unlink()
     missing = view.native_session(first)
     assert missing.status == "unavailable" and missing.session_id == a.session_id
-    assert view.resolve_native_session(second) == b
+    assert view.native_session(second, resolve=True) == b
     with pytest.raises(ValueError, match="not in this run"):
         view.native_session(replace(first, launch_id="other"))
 
@@ -174,21 +182,26 @@ print(json.dumps({'id': req['id'], 'result': {'thread': thread}}), flush=True)
     shutil.copytree(tmp_path / "run", archive, ignore=shutil.ignore_patterns("*.log"))
     view = read_run(archive)
     first, second = view.calls[0].launches
-    captured = view.native_session(first)
-    assert captured.status == "unavailable" and captured.session_id
+    with pytest.raises(UnresolvedSessionError, match="resolve=True") as unresolved:
+        view.native_session(first)
+    assert unresolved.value.harness == "codex" and unresolved.value.session_id
     assert not queries
-    a, b = (view.resolve_native_session(attempt) for attempt in (first, second))
+    a, b = (view.native_session(attempt, resolve=True) for attempt in (first, second))
+    assert a.session_id == unresolved.value.session_id
     assert a.status == b.status == "located"
     assert a.session_id != b.session_id and a.source == b.source == "observed"
     assert all(s.path == external / (s.session_id + ".jsonl") for s in (a, b))
     assert len(queries) == 2
-    assert view.native_session(first) == captured
+    # Resolution writes nothing back: the passive lookup is still unresolved.
+    with pytest.raises(UnresolvedSessionError):
+        view.native_session(first)
+    assert len(queries) == 2
 
     def uncertain(*args):
         raise OwnershipError("could not confirm app-server cleanup")
 
     monkeypatch.setattr(_codex_session, "lookup_codex_path", uncertain)
-    failure = view.resolve_native_session(second)
+    failure = view.native_session(second, resolve=True)
     assert failure.status == "unavailable" and failure.session_id == b.session_id
     assert failure.reason == "could not confirm app-server cleanup"
     assert read_run(archive).calls[0].status == "delivered"
@@ -389,7 +402,7 @@ print(json.dumps({'event': 'result', 'result': {'conversation_id': sid, 'status'
     a.path.unlink()
     missing = view.native_session(first)
     assert missing.status == "unavailable" and missing.session_id == a.session_id
-    assert view.resolve_native_session(second) == b
+    assert view.native_session(second, resolve=True) == b
 
     data["launch"] = second.launch_id
     receipt.write_text(json.dumps(data))

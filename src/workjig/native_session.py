@@ -18,7 +18,7 @@ from uuid import UUID
 
 from . import _session_receipt
 from ._session_observer import _UUID, observe_stdout
-from .models import CommandWorker, LaunchRecord
+from .models import CommandWorker, LaunchRecord, WorkjigError
 
 _AGY_TRANSCRIPT = (".system_generated", "logs", "transcript.jsonl")
 _RECEIPT_LIMIT = 65536
@@ -32,6 +32,22 @@ class NativeSession:
     source: Literal["assigned", "observed"] | None
     path: Path | None
     reason: str | None
+
+
+class UnresolvedSessionError(WorkjigError):
+    """The session ID is known, but only the harness can report its transcript.
+
+    Raised by a lookup made without ``resolve=True``, which starts no process.
+    """
+
+    def __init__(self, harness: str, session_id: str) -> None:
+        self.harness = harness
+        self.session_id = session_id
+        super().__init__(
+            f"{harness} session {session_id} has no recorded transcript location; "
+            f"call native_session(launch, resolve=True) to ask the harness, "
+            f"which starts a short-lived {harness} process"
+        )
 
 
 # -- external stores -----------------------------------------------------------
@@ -376,7 +392,9 @@ def locate_session(
         root = Path(recorded.native_session_root or "")
         original = Path(recorded.launch_dir)
         location = data["location"]
-        if location is None and resolve and harness.resolve is not None:
+        if location is None and harness.resolve is not None:
+            if not resolve:
+                raise UnresolvedSessionError(harness.name, sid)
             if (
                 not root.is_absolute()
                 or root.resolve() != root
@@ -400,6 +418,8 @@ def locate_session(
         path = harness.transcript(root, sid, path)
         if path.resolve() != path or not path.is_file():
             raise ValueError("missing or redirected native transcript")
+    except UnresolvedSessionError:
+        raise
     except (OSError, ValueError, RuntimeError, TypeError, KeyError) as error:
         return NativeSession(
             "unavailable" if identifier else "unassociated",
