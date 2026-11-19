@@ -49,13 +49,12 @@ def test_protocol_names_are_safe_inside_input_and_output_directories(tmp_path: P
         assert run.call(request).reused
 
 
-@pytest.mark.subprocess
+@pytest.mark.unit
 def test_worker_argv_preserves_literal_braces(tmp_path: Path) -> None:
     worker = CommandWorker((sys.executable, "-c", 'print({"x": 1})', "{prompt}"))
     prompt = tmp_path / "{input_dir}" / "prompt.txt"
-    command = worker.command({"prompt": prompt})
-    assert command[2] == 'print({"x": 1})'
-    assert command[3] == str(prompt)
+    command = worker.command({"prompt": prompt, "input_dir": tmp_path / "other"})
+    assert command == (sys.executable, "-c", 'print({"x": 1})', str(prompt))
 
 
 @pytest.mark.parametrize("exit_code, expected", [(0, "delivered"), (7, "process_error")])

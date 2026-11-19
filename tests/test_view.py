@@ -181,7 +181,10 @@ def test_reading_creates_nothing(records: Path, tmp_path: Path) -> None:
     def snapshot() -> list[tuple[str, int]]:
         return sorted((str(p), p.stat().st_mtime_ns) for p in tmp_path.rglob("*"))
 
+    empty = tmp_path / "empty"
+    empty.mkdir()
     before = snapshot()
+    assert read_run(empty) is None
     assert read_run(records) is not None
     assert read_run(tmp_path / "absent") is None
     assert snapshot() == before
@@ -201,15 +204,6 @@ def test_reading_never_touches_the_lock(records: Path, monkeypatch: pytest.Monke
     monkeypatch.setattr(locking, "file_lock", refuse)
     assert read_run(records) is not None
     assert lock.stat().st_mtime_ns == before
-
-
-@pytest.mark.unit
-def test_absent_record_is_none(tmp_path: Path) -> None:
-    assert read_run(tmp_path / "absent") is None
-    empty = tmp_path / "empty"
-    empty.mkdir()
-    assert read_run(empty) is None
-    assert list(empty.iterdir()) == []
 
 
 @pytest.mark.parametrize(

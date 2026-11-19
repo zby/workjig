@@ -390,26 +390,6 @@ def test_workflow_correction_budget_is_bounded(tmp_path: Path) -> None:
 
 
 @pytest.mark.subprocess
-def test_launch_allowance_remains_spent_after_restart(command_script: Path, tmp_path: Path) -> None:
-    log = tmp_path / "events.jsonl"
-    call = request(
-        "fail-twice",
-        command(command_script, log, "always_fail"),
-        max_launches=2,
-        retry=RetryPolicy(on=("process_error",)),
-    )
-    with Run(tmp_path / "records", tmp_path) as run:
-        first = run.call(call)
-    assert first.status == "process_error"
-    assert first.failed_at_launch_limit
-    assert len(first.launches) == 2
-    with Run(tmp_path / "records", tmp_path) as run:
-        resumed = run.call(call)
-    assert resumed.failed_at_launch_limit
-    assert len([e for e in events(log) if e["event"] == "start"]) == 2
-
-
-@pytest.mark.subprocess
 def test_missing_output_and_usage_limit_are_explicit(command_script: Path, tmp_path: Path) -> None:
     log = tmp_path / "events.jsonl"
     with Run(tmp_path / "records", tmp_path) as run:
@@ -600,7 +580,7 @@ def test_problem_written_before_nonzero_exit_is_a_worker_problem(
 
 
 @pytest.mark.subprocess
-def test_backoff_is_waited_between_relaunches_only(command_script: Path, tmp_path: Path) -> None:
+def test_backoff_and_launch_ceiling_across_restart(command_script: Path, tmp_path: Path) -> None:
     log = tmp_path / "events.jsonl"
     waits: list[float] = []
     call = request(
@@ -613,4 +593,9 @@ def test_backoff_is_waited_between_relaunches_only(command_script: Path, tmp_pat
         result = run.call(call)
     assert result.status == "process_error" and result.failed_at_launch_limit
     assert len(result.launches) == 3
-    assert waits == [5.0, 5.0], "no wait before the first launch, one before each relaunch"
+    with Run(tmp_path / "records", tmp_path, sleep=waits.append) as reopened:
+        resumed = reopened.call(call)
+    assert resumed.reused and resumed.failed_at_launch_limit
+    assert resumed.launches == result.launches
+    assert sum(e["event"] == "start" for e in events(log)) == 3
+    assert waits == [5.0, 5.0], "one wait per relaunch, none on replay"

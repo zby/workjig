@@ -17,7 +17,6 @@ from workjig.adapters import (
     parse_evidence,
     pi_worker,
 )
-from workjig.models import CommandWorker
 
 
 def _render(worker):
@@ -109,12 +108,6 @@ def test_agy_command_accepts_explicit_mode_effort_and_sandbox_toggle():
     assert "--dangerously-skip-permissions" not in command
     assert command[-2] == "-p"
     assert worker.track_native_session is True
-
-
-@pytest.mark.unit
-def test_command_rendering_keeps_literal_braces_while_replacing_path_tokens():
-    command = _render(CommandWorker(argv=("worker", '{"literal": 1}', "{prompt}")))
-    assert command == ("worker", '{"literal": 1}', str(Path("launch-1") / "prompt.txt"))
 
 
 @pytest.mark.parametrize(

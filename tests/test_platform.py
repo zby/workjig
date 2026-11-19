@@ -12,22 +12,6 @@ import workjig.platform as platform
 
 
 @pytest.mark.unit
-def test_windows_command_resolution_uses_path_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(platform, "os", SimpleNamespace(name="nt"))
-    monkeypatch.setattr(platform.shutil, "which", lambda _, path: r"C:\Tools\worker.exe")
-
-    assert platform.resolve_command(("worker", "--flag"), {}) == (r"C:\Tools\worker.exe", "--flag")
-
-
-@pytest.mark.unit
-def test_posix_command_resolution_uses_path_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(platform, "os", SimpleNamespace(name="posix"))
-    monkeypatch.setattr(platform.shutil, "which", lambda _, path: "/tmp/bin/worker")
-
-    assert platform.resolve_command(("worker", "--flag"), {}) == ("/tmp/bin/worker", "--flag")
-
-
-@pytest.mark.unit
 def test_command_resolution_searches_the_worker_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
