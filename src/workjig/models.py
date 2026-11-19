@@ -195,7 +195,7 @@ class CommandWorker:
             raise ValueError("native session tracking requires an explicit harness protocol")
         if (
             self.track_native_session
-            and (self.evidence_file or "").casefold() == "native-session.json"
+            and (self.evidence_file or "").rstrip(".").casefold() == "native-session.json"
         ):
             raise ValueError("evidence file conflicts with native session receipt")
         object.__setattr__(self, "argv", argv)

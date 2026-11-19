@@ -60,7 +60,8 @@ def bind_session(
     if root.is_relative_to(launch.parents[1]):
         raise ValueError("tracked native session store must be outside the run")
     if harness == "codex":
-        if any(arg.partition("=")[0] in {"resume", "--last", "fork"} for arg in argv[1:]):
+        options = argv[1 : argv.index("--")] if "--" in argv else argv[1:]
+        if any(arg.partition("=")[0] in {"resume", "--last", "fork"} for arg in options):
             raise ValueError("tracked Codex exec must start a new thread")
         return argv, root
     identifier = str(UUID(launch.name))

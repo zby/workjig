@@ -200,13 +200,29 @@ def test_resume_last_rejected_before_reservation(tmp_path):
 
 
 @pytest.mark.unit
-def test_receipt_filename_reserved_case_insensitively():
+def test_codex_literal_prompt_is_not_a_resume(tmp_path):
+    from workjig.native_session import bind_session
+
+    argv = ("codex", "exec", "--json", "--", "resume")
+    worker = CommandWorker(
+        argv=argv,
+        output_protocol="codex-json",
+        track_native_session=True,
+        env={"CODEX_HOME": str(tmp_path / "external")},
+    )
+    command, _ = bind_session(worker, tmp_path / "run/launches/test", tmp_path, argv)
+    assert command == argv
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("name", ["Native-Session.JSON", "native-session.json.."])
+def test_receipt_filename_reserved_case_insensitively(name):
     with pytest.raises(ValueError, match="conflicts"):
         CommandWorker(
             argv=("pi",),
             output_protocol="pi-json",
             track_native_session=True,
-            evidence_file="Native-Session.JSON",
+            evidence_file=name,
         )
 
 
