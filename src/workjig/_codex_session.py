@@ -7,16 +7,15 @@ import os
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Callable, Iterator, Mapping
-from concurrent.futures import ThreadPoolExecutor
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack
 from pathlib import Path
-from threading import Event
 from typing import BinaryIO
 
-from . import _session_guard, _session_receipt, _windows
-from ._session_observer import _CHUNK, _UUID, _object, observe_stdout
+from . import _session_guard, _windows
+from ._session_observer import _CHUNK, _UUID, _object
 from .platform import OwnershipError, resolve_command
 
 _REPLY_LIMIT = 256 * 1024
@@ -198,46 +197,10 @@ def _stop_group(proc: subprocess.Popen) -> None:
         raise OwnershipError(f"app-server pid {proc.pid} did not stop") from exc
 
 
-@contextmanager
-def capture_codex(
-    stdout: Path | BinaryIO,
-    launch_dir: Path,
-    argv: tuple[str, ...],
-    cwd: Path,
-    env: Mapping[str, str],
-):
-    """Observe alongside the worker; leave this context only after group cleanup."""
-    stopped = Event()
-
-    def publish(native_id: str, path: Path | None) -> None:
-        try:
-            _session_receipt.publish(launch_dir, "codex", native_id, path)
-        except OSError:
-            pass  # Optional evidence; never change the worker outcome.
-
-    def locate(native_id: str) -> bool:
-        try:
-            path = lookup_codex_path(native_id, argv, cwd, env)
-        except OSError:
-            return False
-        if path is None:
-            return False
-        publish(native_id, path)
-        return True
-
-    def observe() -> str | None:
-        native_id = observe_stdout(stdout, stopped, _codex_id, lambda nid: publish(nid, None))
-        if native_id and not stopped.is_set() and locate(native_id):
-            return None
-        return native_id
-
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        observation = pool.submit(observe)
-        try:
-            yield
-        finally:
-            stopped.set()
-        native_id = observation.result()
-    if native_id:
-        # An early thread/read can precede persistence. Try once after settlement.
-        locate(native_id)
+def resolve_codex_path(root: Path, native_id: str) -> Path | None:
+    """Query the reader's Codex installation against the launch's pinned store."""
+    if root.name != "sessions" or not root.is_dir():
+        raise ValueError("pinned Codex sessions directory unavailable")
+    env = os.environ | {"CODEX_HOME": str(root.parent)}
+    with tempfile.TemporaryDirectory() as directory:
+        return lookup_codex_path(native_id, ("codex",), Path(directory), env)

@@ -16,7 +16,7 @@ from threading import Event
 from typing import BinaryIO, Literal
 from uuid import UUID
 
-from . import _session_receipt
+from . import _codex_session, _session_receipt
 from ._session_observer import _UUID, observe_stdout
 from .models import CommandWorker, LaunchRecord
 
@@ -173,23 +173,23 @@ def _agy_id(event: dict) -> str | None:
 
 
 @contextmanager
-def capture_agy(stdout: Path | BinaryIO, launch_dir: Path, root: Path) -> Iterator[None]:
-    """Observe agy's init event alongside the worker; join only after settlement."""
+def _capture_observed(
+    stdout: Path | BinaryIO,
+    launch_dir: Path,
+    harness: str,
+    extract: Callable[[dict], str | None],
+    location: Callable[[str], Path | None],
+) -> Iterator[None]:
     stopped = Event()
 
     def publish(native_id: str) -> None:
         try:
-            _session_receipt.publish(
-                launch_dir,
-                "agy",
-                native_id,
-                root.joinpath(native_id, *_AGY_TRANSCRIPT),
-            )
+            _session_receipt.publish(launch_dir, harness, native_id, location(native_id))
         except OSError:
             pass  # Optional evidence; never change the worker outcome.
 
     with ThreadPoolExecutor(max_workers=1) as pool:
-        observation = pool.submit(observe_stdout, stdout, stopped, _agy_id, publish)
+        observation = pool.submit(observe_stdout, stdout, stopped, extract, publish)
         try:
             yield
         finally:
@@ -198,27 +198,19 @@ def capture_agy(stdout: Path | BinaryIO, launch_dir: Path, root: Path) -> Iterat
 
 
 def _capture_codex(
-    stdout: Path | BinaryIO,
-    launch_dir: Path,
-    command: tuple[str, ...],
-    cwd: Path,
-    env: Mapping[str, str],
-    root: Path,
+    stdout: Path | BinaryIO, launch_dir: Path, root: Path
 ) -> AbstractContextManager[None]:
-    from ._codex_session import capture_codex
-
-    return capture_codex(stdout, launch_dir, command, cwd, env)
+    return _capture_observed(
+        stdout, launch_dir, "codex", _codex_session._codex_id, lambda sid: None
+    )
 
 
 def _capture_agy(
-    stdout: Path | BinaryIO,
-    launch_dir: Path,
-    command: tuple[str, ...],
-    cwd: Path,
-    env: Mapping[str, str],
-    root: Path,
+    stdout: Path | BinaryIO, launch_dir: Path, root: Path
 ) -> AbstractContextManager[None]:
-    return capture_agy(stdout, launch_dir, root)
+    return _capture_observed(
+        stdout, launch_dir, "agy", _agy_id, lambda sid: root.joinpath(sid, *_AGY_TRANSCRIPT)
+    )
 
 
 # -- the per-harness table -----------------------------------------------------
@@ -240,11 +232,13 @@ class _Harness:
     transcript: Callable[[Path, str, Path], Path]
     capture: (
         Callable[
-            [Path | BinaryIO, Path, tuple[str, ...], Path, Mapping[str, str], Path],
+            [Path | BinaryIO, Path, Path],
             AbstractContextManager[None],
         ]
         | None
     ) = None
+
+    resolve: Callable[[Path, str], Path | None] | None = None
 
 
 # Keyed by output protocol; one entry per protocol in models.OutputProtocol.
@@ -254,7 +248,13 @@ _HARNESS = {
         "claude", "assigned", _claude_store, _bind_claude, _claude_transcript
     ),
     "codex-json": _Harness(
-        "codex", "observed", _codex_store, _bind_codex, _codex_transcript, _capture_codex
+        "codex",
+        "observed",
+        _codex_store,
+        _bind_codex,
+        _codex_transcript,
+        _capture_codex,
+        _codex_session.resolve_codex_path,
     ),
     "agy-stream-json": _Harness(
         "agy", "observed", _agy_store, _bind_agy, _agy_transcript, _capture_agy
@@ -271,7 +271,12 @@ def _store(worker: CommandWorker, harness: str, cwd: Path) -> Path:
         parts = Path(value).parts
         return home.joinpath(*parts[1:]) if parts and parts[0] == "~" else Path(value)
 
-    return (cwd / _BY_NAME[harness].store(env, expand)).resolve()
+    store = cwd / _BY_NAME[harness].store(env, expand)
+    if harness == "codex":
+        # Keep sessions under the actual Codex home. Following a sessions-only
+        # symlink here would make its target's parent look like CODEX_HOME.
+        return store.parent.resolve() / store.name
+    return store.resolve()
 
 
 def bind_session(
@@ -282,7 +287,7 @@ def bind_session(
         return argv, None
     harness = _HARNESS[worker.output_protocol]
     root = _store(worker, harness.name, cwd)
-    if root.is_relative_to(launch.parents[1]):
+    if root.is_relative_to(launch.parents[1]) or root.resolve().is_relative_to(launch.parents[1]):
         raise ValueError("tracked native session store must be outside the run")
     return harness.bind(argv, launch, root), root
 
@@ -296,9 +301,6 @@ def capture_session(
     worker: CommandWorker,
     stdout: Path | BinaryIO,
     launch_dir: Path,
-    command: tuple[str, ...],
-    cwd: Path,
-    env: Mapping[str, str],
     root: Path | None,
 ) -> AbstractContextManager[None]:
     """Observe a tracked worker's session start; leave only after group cleanup.
@@ -308,7 +310,7 @@ def capture_session(
     if not worker.track_native_session or root is None:
         return nullcontext()
     capture = _HARNESS[worker.output_protocol].capture
-    return capture(stdout, launch_dir, command, cwd, env, root) if capture else nullcontext()
+    return capture(stdout, launch_dir, root) if capture else nullcontext()
 
 
 def _read_receipt(launch: Path) -> object:
@@ -327,7 +329,9 @@ def _read_receipt(launch: Path) -> object:
     return json.loads(raw)
 
 
-def locate_session(worker: CommandWorker, recorded: LaunchRecord, launch: Path) -> NativeSession:
+def locate_session(
+    worker: CommandWorker, recorded: LaunchRecord, launch: Path, *, resolve: bool = False
+) -> NativeSession:
     if not worker.track_native_session:
         return NativeSession("unassociated", None, None, None, None, "tracking disabled")
     harness = _HARNESS[worker.output_protocol]
@@ -350,11 +354,21 @@ def locate_session(worker: CommandWorker, recorded: LaunchRecord, launch: Path) 
         ):
             raise ValueError("invalid native session ID")
         identifier = sid
-        if data["location"] is None:
-            raise ValueError("no transcript location reported")
-        path = Path(data["location"])
         root = Path(recorded.native_session_root or "")
         original = Path(recorded.launch_dir)
+        location = data["location"]
+        if location is None and resolve and harness.resolve is not None:
+            if (
+                not root.is_absolute()
+                or root.resolve() != root
+                or root.is_relative_to(launch.parents[1])
+                or (len(original.parents) >= 2 and root.is_relative_to(original.parents[1]))
+            ):
+                raise ValueError("invalid pinned native store")
+            location = harness.resolve(root, sid)
+        if location is None:
+            raise ValueError("no transcript location reported")
+        path = Path(location)
         if (
             not root.is_absolute()
             or not path.is_absolute()

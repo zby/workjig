@@ -57,7 +57,11 @@ Optional native-session tracking is per physical launch, not per logical call.
 An assigned session ID is not proof that a worker started. A known ID is not
 proof that a readable or complete transcript exists. Workjig retains a compact
 locator, never copies a native transcript, and never uses it to settle or
-recover a launch. See [ADR 006](../adr/006-locate-native-sessions.md).
+recover a launch. The controller records the observed Codex thread ID.
+A run view can resolve a native transcript on request. An external metadata
+lookup happens only during explicit resolution and cannot affect settlement.
+See [ADR 006](../adr/006-locate-native-sessions.md) and
+[ADR 008](../adr/008-resolve-native-sessions-on-demand.md).
 
 The run manifest names immutable, run-local payloads for declared task, named
 inputs and delivered outputs. A SHA-256 reference identifies the exact UTF-8

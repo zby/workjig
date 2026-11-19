@@ -185,9 +185,6 @@ def launch(
                             request.worker,
                             reader,
                             paths["launch_dir"],
-                            command,
-                            workdir,
-                            env,
                             paths.get("native_session_root"),
                         )
                     )

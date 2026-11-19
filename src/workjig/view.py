@@ -84,9 +84,14 @@ class RunView:
         )
 
     def native_session(self, launch: LaunchRecord) -> NativeSession:
-        """Resolve only this attempt's external native transcript, without reading it."""
+        """Inspect the recorded native session pointer without starting a harness."""
         call, recorded, directory = self._launch_location(launch)
         return locate_session(call.worker, recorded, directory)
+
+    def resolve_native_session(self, launch: LaunchRecord) -> NativeSession:
+        """Locate this attempt's transcript, querying the harness when needed."""
+        call, recorded, directory = self._launch_location(launch)
+        return locate_session(call.worker, recorded, directory, resolve=True)
 
     def launch_files(self, launch: LaunchRecord) -> LaunchFiles:
         """Locations of a launch's files under this view's record directory.

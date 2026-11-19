@@ -1,6 +1,6 @@
 # 006 — Retain per-launch pointers to native session logs
 
-Status: accepted
+Status: accepted, with Codex lookup timing superseded by [ADR 008](008-resolve-native-sessions-on-demand.md)
 Decision date: 2026-11-19
 Recorded: 2026-11-19
 

@@ -92,14 +92,17 @@ def test_lookup_after_timeout_retry_and_shallow_copy(tmp_path, adapter):
     a.path.unlink()
     missing = view.native_session(first)
     assert missing.status == "unavailable" and missing.session_id == a.session_id
-    assert view.native_session(second) == b
+    assert view.resolve_native_session(second) == b
     with pytest.raises(ValueError, match="not in this run"):
         view.native_session(replace(first, launch_id="other"))
 
 
 @pytest.mark.subprocess
 @pytest.mark.parametrize("retain_logs", [True, False])
-def test_codex_timeout_and_retry_resolve_distinct_native_ids(tmp_path, retain_logs):
+def test_codex_timeout_and_retry_resolve_distinct_native_ids(tmp_path, retain_logs, monkeypatch):
+    from workjig import _codex_session
+    from workjig.platform import OwnershipError
+
     external = tmp_path / "native" / "sessions"
     external.mkdir(parents=True)
     script = tmp_path / "exec.py"
@@ -129,10 +132,20 @@ print(json.dumps({'id': init['id'], 'result': {'userAgent': 'test'}}), flush=Tru
 assert json.loads(input())['method'] == 'initialized'
 req = json.loads(input()); sid = req['params']['threadId']
 assert req['method'] == 'thread/read' and not req['params']['includeTurns']
-path = Path(os.environ['STORE']) / (sid + '.jsonl')
+path = Path(os.environ['CODEX_HOME']) / 'sessions' / (sid + '.jsonl')
 thread = {'id': sid, 'path': str(path)}
 print(json.dumps({'id': req['id'], 'result': {'thread': thread}}), flush=True)
 """)
+    queries = []
+
+    def reader_command(argv, env):
+        assert argv == ("codex", "app-server")
+        assert env["CODEX_HOME"] == str(external.parent)
+        queries.append(argv)
+        return (sys.executable, str(tmp_path / "app-server"))
+
+    monkeypatch.setattr(_codex_session, "resolve_command", reader_command)
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "reader-home"))
     worker = replace(
         codex_worker("test", sandbox="read-only", track_native_session=True),
         argv=(sys.executable, str(script), "{output_dir}"),
@@ -158,10 +171,25 @@ print(json.dumps({'id': req['id'], 'result': {'thread': thread}}), flush=True)
     archive = tmp_path / "archive"
     shutil.copytree(tmp_path / "run", archive, ignore=shutil.ignore_patterns("*.log"))
     view = read_run(archive)
-    a, b = (view.native_session(attempt) for attempt in view.calls[0].launches)
+    first, second = view.calls[0].launches
+    captured = view.native_session(first)
+    assert captured.status == "unavailable" and captured.session_id
+    assert not queries
+    a, b = (view.resolve_native_session(attempt) for attempt in (first, second))
     assert a.status == b.status == "located"
     assert a.session_id != b.session_id and a.source == b.source == "observed"
     assert all(s.path == external / (s.session_id + ".jsonl") for s in (a, b))
+    assert len(queries) == 2
+    assert view.native_session(first) == captured
+
+    def uncertain(*args):
+        raise OwnershipError("could not confirm app-server cleanup")
+
+    monkeypatch.setattr(_codex_session, "lookup_codex_path", uncertain)
+    failure = view.resolve_native_session(second)
+    assert failure.status == "unavailable" and failure.session_id == b.session_id
+    assert failure.reason == "could not confirm app-server cleanup"
+    assert read_run(archive).calls[0].status == "delivered"
     receipt = archive / "launches" / result.launches[0].launch_id / "native-session.json"
     data = json.loads(receipt.read_text())
     # Neither a plausible name outside the reserved store, nor another thread's
@@ -175,6 +203,40 @@ print(json.dumps({'id': req['id'], 'result': {'thread': thread}}), flush=True)
     data["launch"] = result.launches[1].launch_id
     receipt.write_text(json.dumps(data))
     assert view.native_session(view.calls[0].launches[0]).status == "unassociated"
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(
+    os.name == "nt", reason="creating directory symlinks requires Windows privileges"
+)
+def test_codex_redirected_sessions_does_not_select_another_home(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from workjig import _codex_session
+    from workjig.native_session import bind_session, locate_session
+
+    home = tmp_path / "home"
+    home.mkdir()
+    target = tmp_path / "other-home" / "sessions"
+    target.mkdir(parents=True)
+    (home / "sessions").symlink_to(target, target_is_directory=True)
+    worker = replace(
+        codex_worker("test", sandbox="read-only", track_native_session=True),
+        env={"CODEX_HOME": str(home)},
+    )
+    launch = tmp_path / "run" / "launches" / "example"
+    launch.mkdir(parents=True)
+    _, root = bind_session(worker, launch, tmp_path, worker.argv)
+    assert root == home / "sessions"
+    sid = "01901234-abcd-7000-8000-123456789abc"
+    _session_receipt.publish(launch, "codex", sid, None)
+    monkeypatch.setattr(
+        _codex_session, "lookup_codex_path", lambda *args: pytest.fail("unexpected query")
+    )
+    recorded = SimpleNamespace(launch_dir=str(launch), native_session_root=str(root))
+    session = locate_session(worker, recorded, launch, resolve=True)
+    assert session.status == "unavailable" and session.session_id == sid
+    assert session.reason == "invalid pinned native store"
 
 
 @pytest.mark.unit
@@ -324,7 +386,7 @@ print(json.dumps({'event': 'result', 'result': {'conversation_id': sid, 'status'
     a.path.unlink()
     missing = view.native_session(first)
     assert missing.status == "unavailable" and missing.session_id == a.session_id
-    assert view.native_session(second) == b
+    assert view.resolve_native_session(second) == b
 
     data["launch"] = second.launch_id
     receipt.write_text(json.dumps(data))

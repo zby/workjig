@@ -312,7 +312,7 @@ identity. No Commonplace wrapper is needed.
 
 ```python
 for launch in call.launches:
-    session = view.native_session(launch)
+    session = view.resolve_native_session(launch)
     if session.status == "located":
         audit(session.path)  # caller policy; the file can still change or disappear
     else:
@@ -323,22 +323,26 @@ for launch in call.launches:
 `unavailable` means the ID is known but there is no safely resolved file.
 `source` is `assigned` (Pi/Claude) or `observed` (Codex/Antigravity CLI) for a
 known ID.
-This checks a live pointer, not part of the frozen view: retrying lookup can
-see a new receipt or a deleted log. The reader does not start a harness,
-open the transcript, inspect stdout, search personal history, or verify
-transcript integrity. Only inspect trusted runs; a locator is not authorization
-to grant access to an external file.
+Use `view.native_session(launch)` to inspect the receipt and check any
+recorded location without starting a harness. Both methods return a
+`NativeSession` and check current files, so a repeat call can see a new
+receipt or a deleted transcript. Neither method writes to the run or takes
+its lock. Only inspect trusted runs and stores. The caller decides whether
+to open the returned path.
 
 Tracked Pi uses a fresh directory under `PI_CODING_AGENT_SESSION_DIR`
 (default: the agent's sessions root), outside the run. Claude reports its
 path via a per-launch `SessionStart` hook; disabling hooks can leave a known
 ID without a path. Workjig supplies the hook settings; combining with a
 second explicit `--settings` is not supported. Codex supplies its own ID
-in `thread.started`; a bounded app-server metadata query can supply its path.
-A crash before an event is observed can leave no ID; an early stop, ephemeral
-session, or unavailable app-server can leave an ID without a path. The controller
-observes the ID while the worker runs; it may retry a missing locator once after
-settlement. Metadata lookup never extends the worker’s execution allowance.
+in `thread.started`. The controller records that ID during execution.
+For an ID-only Codex receipt, `resolve_native_session` makes one bounded
+metadata query for the exact ID using the reader's `codex` on PATH, with
+`CODEX_HOME` set to the parent of the pinned sessions directory. The helper
+runs in a temporary working directory. The reader needs access to the
+original store and a compatible CLI. A redirected sessions directory is
+unavailable. A missing rollout, failed lookup or
+unconfirmed helper cleanup yields `unavailable` and preserves the known ID.
 Antigravity CLI (`agy`) supplies its own `conversation_id` in the `init` event,
 and its transcript path is pinned to
 `<home>/.gemini/antigravity-cli/brain/<id>/.system_generated/logs/transcript.jsonl`
