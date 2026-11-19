@@ -14,7 +14,29 @@ import subprocess
 import time
 from collections.abc import Mapping
 from pathlib import Path
-from typing import BinaryIO, Protocol
+from typing import BinaryIO, Protocol, TextIO
+
+
+def open_manifest(path: Path) -> TextIO:
+    """Open a snapshot without denying atomic replacement by the controller."""
+    if os.name == "nt":
+        from ._windows import open_shared_reader
+
+        return open(path, encoding="utf-8", opener=open_shared_reader)
+    return path.open(encoding="utf-8")
+
+
+def replace_manifest(source: str, target: Path) -> None:
+    try:
+        os.replace(source, target)
+    except PermissionError as error:
+        if os.name != "nt" or error.winerror not in (5, 32):
+            raise
+        # Legacy Windows rename may reject even a delete-shared destination.
+        # Request replacement semantics explicitly, never unlink or wait.
+        from ._windows import replace_open_manifest
+
+        replace_open_manifest(source, target)
 
 
 class FileLock(Protocol):

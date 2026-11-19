@@ -23,6 +23,7 @@ from workjig import (
     read_run,
 )
 from workjig.payloads import PayloadStore
+from workjig.platform import open_manifest
 from workjig.records import (
     CallEntry,
     Delivery,
@@ -260,8 +261,16 @@ def test_read_while_another_process_holds_the_run(tmp_path: Path) -> None:
         (running,) = view.unresolved_launches()
         assert running.status == "running"
         assert view.launch_files(running).stdout.parent == Path(running.launch_dir)
-        gate.write_text("go", encoding="utf-8")
-        assert process.wait(timeout=30) == 0
+        # Deliberately overlap the read handle and delivery commit. Polling alone
+        # only occasionally exposes a Windows reader that denies replacement.
+        with open_manifest(records / "run.json") as snapshot:
+            before = snapshot.read()
+            gate.write_text("go", encoding="utf-8")
+            assert process.wait(timeout=30) == 0
+            snapshot.seek(0)
+            assert snapshot.read() == before
+            with open_manifest(records / "run.json") as committed:
+                assert committed.read() != before
     finally:
         gate.touch()
         if process.poll() is None:

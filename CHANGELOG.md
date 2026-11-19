@@ -6,6 +6,10 @@ so callers can update and decide whether existing run directories remain usable.
 
 ## Unreleased
 
+- Windows run-manifest readers permit atomic replacement while inspecting an
+  active run. Example workers now copy exact bytes or emit explicit LF output
+  instead of relying on platform text-mode defaults.
+
 - Resolving a Codex launch reports a distinct `NativeSession.reason` for a
   missing `codex`, a helper that fails to start, times out, exits, errors or
   reports no path, instead of `no transcript location reported`. See

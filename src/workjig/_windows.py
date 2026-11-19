@@ -1,4 +1,4 @@
-"""Windows process ownership through job objects.
+"""Windows manifest sharing and process ownership through job objects.
 
 Each launch is created suspended, assigned to a fresh job object and only then
 resumed, so a worker cannot spawn anything before it is owned. Settlement
@@ -10,6 +10,7 @@ imports on any platform and the policy can be tested against a fake API.
 from __future__ import annotations
 
 import ctypes
+import os
 import time
 from collections.abc import Mapping
 from ctypes import wintypes
@@ -142,6 +143,22 @@ class ProcessInformation(ctypes.Structure):
 
 
 _SIGNATURES: dict[str, tuple[list[Any], Any]] = {
+    "CreateFileW": (
+        [
+            wintypes.LPCWSTR,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.LPVOID,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.HANDLE,
+        ],
+        wintypes.HANDLE,
+    ),
+    "SetFileInformationByHandle": (
+        [wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD],
+        wintypes.BOOL,
+    ),
     "CreateJobObjectW": ([wintypes.LPVOID, wintypes.LPCWSTR], wintypes.HANDLE),
     "SetInformationJobObject": (
         [wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD],
@@ -244,6 +261,56 @@ def api() -> Any:
     if _api is None:
         _api = Kernel32()
     return _api
+
+
+def _open_shared(path: str, access: int) -> int:
+    kernel = api()
+    share_read_write_delete = 0x1 | 0x2 | 0x4
+    open_existing = 3
+    handle = kernel.CreateFileW(path, access, share_read_write_delete, None, open_existing, 0, None)
+    if handle == ctypes.c_void_p(-1).value:
+        raise kernel.error("open run manifest")
+    return handle
+
+
+def open_shared_reader(path: str, _flags: int) -> int:
+    """Read-only Python opener that grants FILE_SHARE_DELETE."""
+    import msvcrt
+
+    handle = _open_shared(path, 0x80000000)  # GENERIC_READ
+    try:
+        # The descriptor takes ownership; FileIO will close it with the stream.
+        return msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY)
+    except BaseException:
+        api().CloseHandle(handle)
+        raise
+
+
+def replace_open_manifest(source: str, target: Path) -> None:
+    """Atomically replace a delete-shared destination with live readers."""
+    name = str(target.absolute()).encode("utf-16-le", errors="surrogatepass")
+
+    class RenameInfo(ctypes.Structure):
+        _fields_ = [
+            ("Flags", wintypes.DWORD),
+            ("RootDirectory", wintypes.HANDLE),
+            ("FileNameLength", wintypes.DWORD),
+            ("FileName", ctypes.c_ubyte * (len(name) + 2)),
+        ]
+
+    # FileRenameInfoEx: REPLACE_IF_EXISTS | POSIX_SEMANTICS. Old handles
+    # keep reading the old file; new opens see the new one.
+    info = RenameInfo(0x1 | 0x2, None, len(name))
+    info.FileName[: len(name)] = name
+    kernel = api()
+    handle = _open_shared(source, 0x10000)  # DELETE access to rename the source
+    try:
+        if not kernel.SetFileInformationByHandle(
+            handle, 22, ctypes.byref(info), ctypes.sizeof(info)
+        ):
+            raise kernel.error("replace open run manifest")
+    finally:
+        kernel.CloseHandle(handle)
 
 
 def command_line(argv: tuple[str, ...]) -> str:

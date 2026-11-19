@@ -28,7 +28,7 @@ from .models import (
     WorkjigError,
 )
 from .payloads import PayloadStore
-from .platform import sync_directory
+from .platform import replace_manifest, sync_directory
 from .records import (
     CallEntry,
     Delivery,
@@ -201,7 +201,7 @@ class Run:
                 file.write(encoded)
                 file.flush()
                 os.fsync(file.fileno())
-            os.replace(name, self.record_dir / "run.json")
+            replace_manifest(name, self.record_dir / "run.json")
             sync_directory(self.record_dir)
         finally:
             if os.path.exists(name):

@@ -21,6 +21,7 @@ EXAMPLES = ROOT / "examples"
 COPY_WORKER = r"""
 import json
 import re
+import shutil
 import sys
 from pathlib import Path
 
@@ -44,7 +45,7 @@ for line in required.splitlines():
     if not line.startswith("- "):
         break
     _, path = line[2:].split(": ", 1)
-    Path(path).write_text(Path(source).read_text(encoding="utf-8"), encoding="utf-8")
+    shutil.copyfile(source, path)
 if harness == "codex":
     events = [{"type": "turn.completed"}]
 elif harness == "claude":

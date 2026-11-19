@@ -68,14 +68,14 @@ tools see only records Workjig accepts. A corrupt record shows nothing through
 this API; it can still be opened as a file. The view may be stale by the time
 it is used, and files of an unsettled launch may still be changing.
 
-Unresolved limitations:
-
-- **Windows.** The controller commits by replacing `run.json`. A reader that
-  has the file open at that moment may make the replacement fail, which leaves
-  the controller uncertain and its launch unresolved. This is reasoned from
-  documented platform behavior and is neither reproduced nor ruled out.
-  Reading beside a live controller is exercised on Linux only, and the usage
-  guide says so.
+- **Windows.** [Windows CI](https://github.com/zby/workjig/actions/runs/44508986098)
+  observed a reader colliding with replacement of `run.json`. Workjig readers
+  now grant delete sharing. When ordinary replacement is denied, the writer
+  requests `FileRenameInfoEx` with replace and
+  [POSIX semantics](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/ns-ntifs-_file_rename_information):
+  existing handles retain their snapshot while new readers see the new file.
+  There is no delete-then-rename interval or indefinite retry. Unsupported
+  filesystems and incompatible external handles can still prevent a commit.
 - **Launch IDs.** Loading accepts any nonempty launch ID. `launch_files`
   raises `ValueError` for one that is not a plain directory name, so a view of
   a damaged record can hold a launch it cannot locate. Whether loading should
@@ -87,6 +87,6 @@ readers with this API.
 
 ## Reevaluate when
 
-The Windows collision is reproduced or ruled out; a consumer needs lenient
+A supported Windows filesystem cannot perform snapshot replacement; a consumer needs lenient
 loading, version order, the evidence file or lock state from the view; or the
 persisted `attempts` field is renamed once no consumer parses the file.

@@ -48,7 +48,7 @@ def main() -> None:
         output_name = "combined.txt"
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    (args.output_dir / output_name).write_text(content, encoding="utf-8")
+    (args.output_dir / output_name).write_text(content, encoding="utf-8", newline="\n")
     log_file = Path(os.environ["ORDINARY_WORKER_LOG"])
     line = (
         json.dumps(

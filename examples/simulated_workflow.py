@@ -38,7 +38,8 @@ def main() -> None:
         ),
         name="simulated-harness",
     )
-    source = "example source\n"
+    # Mixed newlines make a text-mode reserialization distinguishable from a copy.
+    source = "example source\r\nsecond line\n"
     request = Request(
         call_id="copy",
         task="Copy source.txt to result.txt and uppercase it into edited.txt in the workdir.",

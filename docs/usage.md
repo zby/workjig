@@ -292,11 +292,11 @@ controller's own active ones. `busy(record_dir)` asks separately whether a
 controller holds the lock; the two answers can change between reads.
 Acknowledging a stopped launch still requires an open `Run`.
 
-Reading beside a live controller is exercised on Linux only. On Windows a
-reader that has `run.json` open while the controller replaces it may make that
-commit fail, which leaves the controller uncertain and its launch unresolved;
-this has not been reproduced or ruled out. Until it is, read on Windows only
-when no controller is working.
+Use `read_run()` rather than holding `run.json` open directly on Windows.
+Its read handle permits replacement. If ordinary replacement is denied, the
+controller requests Windows' atomic rename-over-open-file semantics. This
+requires filesystem and OS support; unrelated programs can still deny sharing.
+A failed commit remains an error, never a reason to adopt uncommitted output.
 
 ### Locate a native session
 

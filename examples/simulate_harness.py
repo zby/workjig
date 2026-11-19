@@ -23,7 +23,7 @@ def main() -> None:
     prompt = args.prompt.read_text(encoding="utf-8")
     if not prompt.strip():
         raise ValueError("empty task prompt")
-    source = (args.inputs / "source.txt").read_text(encoding="utf-8")
+    source = (args.inputs / "source.txt").read_bytes()
 
     # This deliberately synthetic session file is distinct from stdout and the
     # optional evidence object collected by Workjig. It claims no native schema.
@@ -44,8 +44,8 @@ def main() -> None:
         return
 
     # The working directory is shared, not sandboxed or rolled back by Workjig.
-    Path("edited.txt").write_text(source.upper(), encoding="utf-8")
-    (args.outputs / "result.txt").write_text(source, encoding="utf-8")
+    Path("edited.txt").write_text(source.decode("utf-8").upper(), encoding="utf-8", newline="")
+    (args.outputs / "result.txt").write_bytes(source)
 
 
 if __name__ == "__main__":

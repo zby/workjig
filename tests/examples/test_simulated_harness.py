@@ -33,8 +33,8 @@ def test_simulator_outputs_effects_logs_and_replay(tmp_path):
     assert report["accepted"] is True
     assert report["reused"] is False
     launch = Path(report["launch_dir"])
-    assert (launch / "outputs" / "result.txt").read_text() == "example source\n"
-    assert (workdir / "edited.txt").read_text() == "EXAMPLE SOURCE\n"
+    assert (launch / "outputs" / "result.txt").read_bytes() == b"example source\r\nsecond line\n"
+    assert (workdir / "edited.txt").read_bytes() == b"EXAMPLE SOURCE\r\nSECOND LINE\n"
     prompt = (launch / "prompt.txt").read_text()
     assert str(launch / "inputs" / "source.txt") in prompt
     event = json.loads((launch / "stdout.log").read_text())

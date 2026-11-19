@@ -24,6 +24,7 @@ from .models import (
     thaw_json,
 )
 from .payloads import PayloadStore, RecordError
+from .platform import open_manifest
 
 RECORD_VERSION = 4
 _LAUNCH_FIELDS = frozenset(item.name for item in fields(LaunchRecord))
@@ -369,7 +370,8 @@ class RunState:
 def load_state(path: Path, store: PayloadStore) -> RunState | None:
     """Read and validate ``run.json``; None when the file does not exist."""
     try:
-        text = path.read_text(encoding="utf-8")
+        with open_manifest(path) as manifest:
+            text = manifest.read()
     except FileNotFoundError:
         return None
     except (OSError, UnicodeError) as error:
