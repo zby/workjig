@@ -135,9 +135,17 @@ def test_cooperative_timeout_commits_timeout_even_after_exit_zero(tmp_path: Path
     assert replay.status == "timeout"
 
 
-@pytest.mark.parametrize("grandchild", [False, True])
-@pytest.mark.parametrize("leader_exits", [pytest.param(False, marks=pytest.mark.slow), True])
-@pytest.mark.parametrize("retain_logs", [True, False])
+# Each value of each dimension appears with each value of the others at least
+# once; ownership does not depend on the full product.
+@pytest.mark.parametrize(
+    ("leader_exits", "grandchild", "retain_logs"),
+    [
+        pytest.param(False, False, True, marks=pytest.mark.slow),
+        pytest.param(False, True, False, marks=pytest.mark.slow),
+        (True, False, False),
+        (True, True, True),
+    ],
+)
 @pytest.mark.subprocess
 def test_process_group_children_are_stopped(
     tmp_path: Path, leader_exits: bool, grandchild: bool, retain_logs: bool

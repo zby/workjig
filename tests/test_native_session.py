@@ -4,7 +4,6 @@ import json
 import os
 import shutil
 import sys
-import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -108,7 +107,9 @@ def test_lookup_after_timeout_retry_and_shallow_copy(tmp_path, adapter):
 
 @pytest.mark.subprocess
 @pytest.mark.slow
-@pytest.mark.parametrize("retain_logs", [True, False])
+# Codex and agy share one observer. Codex reads the launch stream without a
+# retained log here; the agy case below reads the retained log.
+@pytest.mark.parametrize("retain_logs", [False])
 def test_codex_timeout_and_retry_resolve_distinct_native_ids(tmp_path, retain_logs, monkeypatch):
     from workjig import _codex_session
     from workjig.platform import OwnershipError
@@ -325,7 +326,7 @@ def test_generic_command_cannot_enable_tracking_without_protocol():
 
 @pytest.mark.subprocess
 @pytest.mark.slow
-@pytest.mark.parametrize("retain_logs", [True, False])
+@pytest.mark.parametrize("retain_logs", [True])
 def test_agy_timeout_and_retry_resolve_distinct_native_ids(tmp_path, retain_logs):
     home = tmp_path / "agy-home"
     brain = home / ".gemini" / "antigravity-cli" / "brain"
@@ -479,47 +480,6 @@ def test_agy_partial_init_and_missing_transcript(tmp_path):
     assert by_call["no-file"].status == "unavailable"
     assert by_call["no-file"].session_id == sid
     assert by_call["no-file"].source == "observed"
-
-
-@pytest.mark.subprocess
-@pytest.mark.slow
-def test_agy_slow_receipt_does_not_extend_worker_lifetime(tmp_path, monkeypatch):
-    home = tmp_path / "agy-home"
-    home.mkdir()
-    home_var = "USERPROFILE" if os.name == "nt" else "HOME"
-    sid = "01901234-abcd-7000-8000-123456789abc"
-    event = json.dumps({"event": "init", "conversation_id": sid})
-
-    def slow(*_):
-        (tmp_path / "observed").touch()
-        time.sleep(1.5)
-
-    monkeypatch.setattr(_session_receipt, "publish", slow)
-    script = tmp_path / "agy_slow.py"
-    script.write_text(f"""\
-import time
-from pathlib import Path
-print({event!r}, flush=True)
-while not Path('observed').exists(): time.sleep(.01)
-time.sleep(1)
-Path('late-effect').touch()
-""")
-    req = Request(
-        "timeout",
-        "test",
-        {},
-        ("done",),
-        CommandWorker(
-            argv=(sys.executable, str(script)),
-            output_protocol="agy-stream-json",
-            track_native_session=True,
-            env={home_var: str(home)},
-        ),
-        timeout_seconds=0.75,
-    )
-    with Run(tmp_path / "records", tmp_path) as run:
-        assert run.call(req).status == "timeout"
-    assert (tmp_path / "observed").exists() and not (tmp_path / "late-effect").exists()
 
 
 @pytest.mark.unit

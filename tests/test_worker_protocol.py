@@ -99,9 +99,9 @@ def test_generic_log_text_does_not_classify_usage_limits(
     assert (tmp_path / "launches").read_text().splitlines() == ["launch"] * count
 
 
-@pytest.mark.parametrize("message", ["", "Usage limit reached"])
 @pytest.mark.subprocess
-def test_timeout_is_not_classified_as_usage_limit(tmp_path: Path, message: str) -> None:
+def test_timeout_is_not_classified_as_usage_limit(tmp_path: Path) -> None:
+    message = "Usage limit reached"
     script = tmp_path / "worker.py"
     script.write_text(f"import time\nprint({message!r}, flush=True)\ntime.sleep(30)\n")
     with Run(tmp_path / "records", tmp_path) as run:

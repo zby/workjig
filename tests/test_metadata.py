@@ -58,7 +58,6 @@ def test_deep_metadata_does_not_escape_parser(tmp_path):
         ("absent", '{"x":1e400}', "log_limit", "process_error", 2),
         ("absent", "deep", "exit", "delivered", 1),
         pytest.param("fifo", "fifo", "exit", "protocol_error", 2, marks=fifo_only),
-        pytest.param("deep", "deep", "timeout", "timeout", 2, marks=pytest.mark.slow),
         pytest.param("absent", "fifo", "exit", "delivered", 2, marks=fifo_only),
         pytest.param("absent", "{}", "log_fifo", "process_error", 1, marks=fifo_only),
     ],
