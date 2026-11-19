@@ -117,10 +117,12 @@ concrete directory/permission design or workdir isolation facility.
 ## A local whole-run record keeps persistence small
 
 One controller owns a run under an exclusive lock. State is written as a
-whole JSON document with atomic replacement. Completion and delivered content
-are committed together, keeping reuse and recovery reasoning local.
+whole JSON manifest with atomic replacement. Durable run-local payloads precede
+the manifest commit: completion and its exact delivered content become visible
+together (see [ADR 007](../adr/007-normalize-call-payloads.md)).
 
-The cost is rewriting accumulated request and result data on transitions.
+The cost is rewriting accumulated metadata on transitions and verifying payloads
+when opening a run.
 This favors simple local runs over high write throughput or distributed
 controllers.
 

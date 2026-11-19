@@ -16,6 +16,7 @@ from .models import (
     launch_files_under,
 )
 from .native_session import NativeSession, locate_session
+from .payloads import PayloadStore
 from .records import WORK_FIELDS, CallEntry, load_state
 
 
@@ -83,9 +84,14 @@ class RunView:
         )
 
     def native_session(self, launch: LaunchRecord) -> NativeSession:
-        """Resolve only this attempt's external native transcript, without reading it."""
+        """Inspect the recorded native session pointer without starting a harness."""
         call, recorded, directory = self._launch_location(launch)
         return locate_session(call.worker, recorded, directory)
+
+    def resolve_native_session(self, launch: LaunchRecord) -> NativeSession:
+        """Locate this attempt's transcript, querying the harness when needed."""
+        call, recorded, directory = self._launch_location(launch)
+        return locate_session(call.worker, recorded, directory, resolve=True)
 
     def launch_files(self, launch: LaunchRecord) -> LaunchFiles:
         """Locations of a launch's files under this view's record directory.
@@ -116,7 +122,7 @@ def read_run(record_dir: str | Path) -> RunView | None:
     directory is reported, not checked.
     """
     root = Path(record_dir).resolve()
-    state = load_state(root / "run.json")
+    state = load_state(root / "run.json", PayloadStore(root))
     if state is None:
         return None
     return RunView(

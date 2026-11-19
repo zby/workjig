@@ -137,9 +137,10 @@ def test_cooperative_timeout_commits_timeout_even_after_exit_zero(tmp_path: Path
 
 @pytest.mark.parametrize("grandchild", [False, True])
 @pytest.mark.parametrize("leader_exits", [pytest.param(False, marks=pytest.mark.slow), True])
+@pytest.mark.parametrize("retain_logs", [True, False])
 @pytest.mark.subprocess
 def test_process_group_children_are_stopped(
-    tmp_path: Path, leader_exits: bool, grandchild: bool
+    tmp_path: Path, leader_exits: bool, grandchild: bool, retain_logs: bool
 ) -> None:
     script = tmp_path / "worker.py"
     script.write_text(
@@ -178,7 +179,7 @@ if mode == 'wait':
         "exit" if leader_exits else "wait",
         "grandchild" if grandchild else "child",
     )
-    with Run(tmp_path / "records", tmp_path) as run:
+    with Run(tmp_path / "records", tmp_path, retain_logs=retain_logs) as run:
         result = run.call(_request(worker, timeout=2))
     assert result.status == ("process_error" if leader_exits else "timeout")
     assert result.outputs == {}

@@ -57,7 +57,22 @@ Optional native-session tracking is per physical launch, not per logical call.
 An assigned session ID is not proof that a worker started. A known ID is not
 proof that a readable or complete transcript exists. Workjig retains a compact
 locator, never copies a native transcript, and never uses it to settle or
-recover a launch. See [ADR 006](../adr/006-locate-native-sessions.md).
+recover a launch. The controller records the observed Codex thread ID.
+A run view can resolve a native transcript on request. An external metadata
+lookup happens only during explicit resolution and cannot affect settlement.
+See [ADR 006](../adr/006-locate-native-sessions.md) and
+[ADR 008](../adr/008-resolve-native-sessions-on-demand.md).
+
+The run manifest names immutable, run-local payloads for declared task, named
+inputs and delivered outputs. A SHA-256 reference identifies the exact UTF-8
+bytes, not a call or an approval. Payloads are durable before their references
+are committed. An unreferenced payload cannot establish delivery or authorize
+work; missing or damaged referenced bytes are record errors. Worker-facing files
+are independent materializations, not links to the payloads. See [ADR 007](../adr/007-normalize-call-payloads.md).
+
+Raw launch stdout and stderr are retained by default. Disabling their retention
+applies only to new launches; it does not disable live protocol evidence,
+change the terminal classification or alter work identity.
 
 Only complete, atomically committed result records are reusable. Workflow
 acceptance is separate: a resumed workflow reruns its checks against the

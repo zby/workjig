@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from workjig import CommandWorker, Request, Run, _codex_session, _session_receipt, read_run
+from workjig._session_observer import EventObserver
 
 SID = "01901234-abcd-7000-8000-123456789abc"
 EVENT = json.dumps({"type": "thread.started", "thread_id": SID}).encode()
@@ -17,7 +18,7 @@ EVENT = json.dumps({"type": "thread.started", "thread_id": SID}).encode()
 
 @pytest.mark.unit
 def test_only_complete_top_level_canonical_id():
-    events = _codex_session._Events()
+    events = EventObserver(_codex_session._codex_id)
     for invalid in [
         b"not json",
         b"[" * 2000,

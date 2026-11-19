@@ -14,23 +14,35 @@ from workjig import (
     UncertainLaunchError,
     WorkjigError,
 )
-from workjig.records import RunState, launch_to_json, material_hash, request_material
+from workjig.payloads import PayloadStore
+from workjig.records import (
+    RunState,
+    launch_to_json,
+    material_hash,
+    request_material,
+    stored_material,
+)
 
 pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
-def state():
+def store(tmp_path):
+    return PayloadStore(tmp_path)
+
+
+@pytest.fixture
+def state(store):
     request = Request("job", "Write answer", {}, ("answer.txt",), CommandWorker(("worker",)))
     material = request_material(request)
     reservation = LaunchRecord("launch", "reserved", "/private/launch", argv=("worker",))
     return {
-        "version": 3,
+        "version": 4,
         "workdir": "/private",
         "calls": {
             "job": {
                 material_hash(material): {
-                    "request": material,
+                    "request": stored_material(request, store),
                     "attempts": [launch_to_json(reservation)],
                     "result": None,
                 }
@@ -55,15 +67,15 @@ def state():
         ("resumed_usage_stop", []),
     ],
 )
-def test_invalid_recorded_controls_rejected(state, field, bad):
+def test_invalid_recorded_controls_rejected(state, store, field, bad):
     entry = next(iter(state["calls"]["job"].values()))
     entry["attempts"][0][field] = bad
     with pytest.raises(RecordError):
-        RunState.from_json(state)
+        RunState.from_json(state, store)
 
 
-def test_reservation_records_validate_without_process_start(state):
-    assert RunState.from_json(state).to_json() == state
+def test_reservation_records_validate_without_process_start(state, store):
+    assert RunState.from_json(state, store).to_json() == state
 
 
 @pytest.mark.parametrize(
@@ -80,7 +92,7 @@ def test_reservation_records_validate_without_process_start(state):
     ],
 )
 def test_history_requires_allowance_and_appropriate_authorization(
-    state, status, approval, ceiling, retry, valid
+    state, store, status, approval, ceiling, retry, valid
 ):
     entry = next(iter(state["calls"]["job"].values()))
     finished = LaunchRecord(
@@ -99,13 +111,13 @@ def test_history_requires_allowance_and_appropriate_authorization(
     next_launch["retry"] = {"on": list(retry), "backoff_seconds": 0}
     entry["attempts"].insert(0, launch_to_json(finished))
     if valid:
-        assert RunState.from_json(state).to_json() == state
+        assert RunState.from_json(state, store).to_json() == state
     else:
         with pytest.raises(RecordError):
-            RunState.from_json(state)
+            RunState.from_json(state, store)
 
 
-def test_third_launch_cannot_use_ceiling_two(state):
+def test_third_launch_cannot_use_ceiling_two(state, store):
     entry = next(iter(state["calls"]["job"].values()))
     first = LaunchRecord(
         "one",
@@ -124,7 +136,7 @@ def test_third_launch_cannot_use_ceiling_two(state):
     third["retry"] = {"on": ["process_error"], "backoff_seconds": 0}
     entry["attempts"] = [launch_to_json(first), launch_to_json(second), third]
     with pytest.raises(RecordError, match="allowance exceeded"):
-        RunState.from_json(state)
+        RunState.from_json(state, store)
 
 
 def test_work_material_is_every_request_field_except_controls():

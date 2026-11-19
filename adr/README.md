@@ -19,6 +19,8 @@ turning every paragraph of that overview into a record.
 | [004](004-own-windows-workers-with-job-objects.md) | Own Windows workers with job objects | Accepted |
 | [005](005-read-run-records-through-a-lock-free-view.md) | Read run records through a validated, lock-free view | Accepted |
 | [006](006-locate-native-sessions.md) | Retain per-launch pointers to native session logs | Accepted |
+| [007](007-normalize-call-payloads.md) | Share exact call payloads within one run | Accepted |
+| [008](008-resolve-native-sessions-on-demand.md) | Resolve native transcript paths on demand through RunView | Accepted |
 
 ## When to write one
 

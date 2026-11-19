@@ -7,9 +7,13 @@ may be useful evidence even when the harness subsequently succeeds.
 from __future__ import annotations
 
 import json
+import os
 import re
+import stat
 from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
+from typing import BinaryIO
 
 # Observed terminal messages and provider error codes; not a universal taxonomy.
 _QUOTA = re.compile(
@@ -30,34 +34,45 @@ def _reject_constant(value: str) -> None:
     raise ValueError(f"invalid JSON constant: {value}")
 
 
-def _records(path: Path, key: str = "type") -> Iterator[dict[str, object]]:
-    if path.is_symlink() or not path.is_file():
+@contextmanager
+def stdout_reader(source: Path | BinaryIO) -> Iterator[BinaryIO]:
+    if not isinstance(source, Path):
+        yield source
+        return
+    # A worker can replace a retained log. Never follow a symlink or wait on a FIFO.
+    if source.is_symlink() or not source.is_file():
         raise ValueError("harness log is not a regular file")
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
+    flags |= getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
+    with os.fdopen(os.open(source, flags), "rb") as stream:
+        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+            raise ValueError("harness log is not a regular file")
+        yield stream
+
+
+def _records(stream: BinaryIO, key: str) -> Iterator[dict[str, object]]:
+    stream.seek(0)
     # JSONL is LF-delimited; Unicode paragraph separators are valid string data.
-    with path.open(encoding="utf-8", newline="\n") as stream:
-        for line in stream:
-            if not line.strip():
-                continue
-            value = json.loads(line, parse_constant=_reject_constant)
-            if not isinstance(value, dict) or not isinstance(value.get(key), str):
-                raise ValueError("invalid harness event")
-            yield value
+    for raw_line in stream:
+        line = raw_line.decode("utf-8")
+        if not line.strip():
+            continue
+        value = json.loads(line, parse_constant=_reject_constant)
+        if not isinstance(value, dict) or not isinstance(value.get(key), str):
+            raise ValueError("invalid harness event")
+        yield value
 
 
-def terminal_failure(protocol: str, stdout: Path) -> str | None:
+def terminal_failure(protocol: str, stdout: Path | BinaryIO) -> str | None:
     """Return usage_limit/process_error, or None after a successful terminal event.
 
     Missing or malformed completion evidence is process_error. The caller still
     checks process exit, cleanup, worker problems and delivered files.
     """
-    parser, key = {
-        "codex-json": (_codex, "type"),
-        "claude-stream-json": (_claude, "type"),
-        "pi-json": (_pi, "type"),
-        "agy-stream-json": (_agy, "event"),
-    }[protocol]
+    parser, key = _PARSERS[protocol]
     try:
-        return parser(_records(stdout, key))
+        with stdout_reader(stdout) as stream:
+            return parser(_records(stream, key))
     except (OSError, UnicodeError, ValueError, RecursionError):
         return "process_error"
 
@@ -157,3 +172,12 @@ def _agy(records: Iterator[dict[str, object]]) -> str | None:
             else:
                 outcome = "process_error"
     return outcome
+
+
+# Keyed by output protocol: the classifier and the field naming each event.
+_PARSERS = {
+    "codex-json": (_codex, "type"),
+    "claude-stream-json": (_claude, "type"),
+    "pi-json": (_pi, "type"),
+    "agy-stream-json": (_agy, "event"),
+}

@@ -126,12 +126,21 @@ def test_readme_python_examples(tmp_path, monkeypatch, capsys, substitute_harnes
 
 
 @pytest.mark.subprocess
-@pytest.mark.parametrize("harness", ["all", "claude", "codex", "pi", "agy"])
+@pytest.mark.parametrize(
+    ("harness", "flags"),
+    [
+        ("all", []),
+        ("claude", ["-v"]),
+        ("codex", ["--no-verbose"]),
+        ("pi", ["--verbose"]),
+        ("agy", ["--no-verbose"]),
+    ],
+)
 def test_smoke_probe_example_with_substitutes(
-    tmp_path, monkeypatch, capsys, substitute_harnesses, harness
+    tmp_path, monkeypatch, capsys, substitute_harnesses, harness, flags
 ):
     root = tmp_path / "probe"
-    argv = ["smoke_harness.py", harness, str(root)]
+    argv = ["smoke_harness.py", harness, str(root), *flags]
     if harness != "all":
         argv.extend(["--model", "fixture-model"])
     monkeypatch.setattr(sys, "argv", argv)
@@ -146,7 +155,11 @@ def test_smoke_probe_example_with_substitutes(
             assert report["requested_model"] == "fixture-model"
         assert report["launches"] == 1
         assert report["reused"] is True
-        assert report["evidence"]["parse_errors"] == 0
+        if "--no-verbose" in flags:
+            assert report["evidence"] is None
+            assert not list(root.rglob("*.log"))
+        else:
+            assert report["evidence"]["parse_errors"] == 0
         workdir = root / report["harness"] if harness == "all" else root
         assert report["records"] == str(workdir / "records")
         assert (workdir / "records" / "run.json").is_file()

@@ -11,7 +11,7 @@ from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 from types import MappingProxyType
-from typing import Literal
+from typing import Literal, get_args
 
 
 class WorkjigError(RuntimeError):
@@ -150,7 +150,9 @@ class RetryPolicy:
         object.__setattr__(self, "backoff_seconds", float(self.backoff_seconds))
 
 
-_OUTPUT_PROTOCOLS = frozenset({"codex-json", "claude-stream-json", "pi-json", "agy-stream-json"})
+# The stdout protocols with a terminal-outcome classifier; the one place they are listed.
+OutputProtocol = Literal["codex-json", "claude-stream-json", "pi-json", "agy-stream-json"]
+_OUTPUT_PROTOCOLS = frozenset(get_args(OutputProtocol))
 
 
 @dataclass(frozen=True)
@@ -167,9 +169,7 @@ class CommandWorker:
     name: str = "command"
     env: Mapping[str, str] = field(default_factory=dict)
     evidence_file: str | None = None
-    output_protocol: (
-        Literal["codex-json", "claude-stream-json", "pi-json", "agy-stream-json"] | None
-    ) = None
+    output_protocol: OutputProtocol | None = None
 
     track_native_session: bool = False
 

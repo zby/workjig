@@ -201,7 +201,7 @@ def parse_evidence(
     Raw stdout remains authoritative evidence. Parsing a partial stream yields
     only fields actually present; callers retain parse_errors for diagnosis.
     """
-    if harness not in {"codex", "claude", "pi", "agy"}:
+    if harness not in _EVIDENCE:
         raise ValueError("unknown harness")
     records: list[dict[str, object]] = []
     parse_errors = 0
@@ -225,73 +225,78 @@ def parse_evidence(
         "records": len(records),
         "parse_errors": parse_errors,
     }
-    if harness == "codex":
-        error_events = 0
-        for record in records:
-            if record.get("type") == "thread.started" and isinstance(record.get("thread_id"), str):
-                evidence["session_id"] = record["thread_id"]
-            if record.get("type") in {"turn.completed", "turn.failed"}:
-                evidence["turn_outcome"] = record["type"]
-            if record.get("type") == "error":
-                error_events += 1
-        if error_events:
-            evidence["error_event_count"] = error_events
-        return evidence
+    _EVIDENCE[harness](records, evidence)
+    return evidence
 
-    if harness == "claude":
-        retry_errors: list[str] = []
-        for record in records:
-            if record.get("type") == "system" and record.get("subtype") == "api_retry":
-                if isinstance(record.get("error"), str):
-                    retry_errors.append(record["error"])
-            if record.get("type") == "assistant":
-                message = record.get("message")
-                if isinstance(message, dict) and isinstance(message.get("model"), str):
-                    evidence["reported_model"] = message["model"]
-            if record.get("type") == "result":
-                evidence["last_result_subtype"] = record.get("subtype")
-                if isinstance(record.get("modelUsage"), dict):
-                    evidence["model_usage"] = record["modelUsage"]
-                if isinstance(record.get("session_id"), str):
-                    evidence["session_id"] = record["session_id"]
-                if isinstance(record.get("is_error"), bool):
-                    evidence["is_error"] = record["is_error"]
-        if retry_errors:
-            evidence["retry_error_categories"] = retry_errors
-        return evidence
 
-    if harness == "agy":
-        for record in records:
-            event = record.get("event")
-            if event == "init":
-                cid = record.get("conversation_id")
+def _codex_evidence(records: list[dict[str, object]], evidence: dict[str, object]) -> None:
+    error_events = 0
+    for record in records:
+        if record.get("type") == "thread.started" and isinstance(record.get("thread_id"), str):
+            evidence["session_id"] = record["thread_id"]
+        if record.get("type") in {"turn.completed", "turn.failed"}:
+            evidence["turn_outcome"] = record["type"]
+        if record.get("type") == "error":
+            error_events += 1
+    if error_events:
+        evidence["error_event_count"] = error_events
+
+
+def _claude_evidence(records: list[dict[str, object]], evidence: dict[str, object]) -> None:
+    retry_errors: list[str] = []
+    for record in records:
+        if record.get("type") == "system" and record.get("subtype") == "api_retry":
+            if isinstance(record.get("error"), str):
+                retry_errors.append(record["error"])
+        if record.get("type") == "assistant":
+            message = record.get("message")
+            if isinstance(message, dict) and isinstance(message.get("model"), str):
+                evidence["reported_model"] = message["model"]
+        if record.get("type") == "result":
+            evidence["last_result_subtype"] = record.get("subtype")
+            if isinstance(record.get("modelUsage"), dict):
+                evidence["model_usage"] = record["modelUsage"]
+            if isinstance(record.get("session_id"), str):
+                evidence["session_id"] = record["session_id"]
+            if isinstance(record.get("is_error"), bool):
+                evidence["is_error"] = record["is_error"]
+    if retry_errors:
+        evidence["retry_error_categories"] = retry_errors
+
+
+def _agy_evidence(records: list[dict[str, object]], evidence: dict[str, object]) -> None:
+    for record in records:
+        event = record.get("event")
+        if event == "init":
+            cid = record.get("conversation_id")
+            if isinstance(cid, str) and cid:
+                evidence["session_id"] = cid
+            init = record.get("init")
+            if isinstance(init, dict):
+                if isinstance(init.get("model"), str) and init["model"]:
+                    evidence["reported_model"] = init["model"]
+                if isinstance(init.get("permission_mode"), str) and init["permission_mode"]:
+                    evidence["permission_mode"] = init["permission_mode"]
+        if event == "result":
+            result = record.get("result")
+            if isinstance(result, dict):
+                cid = result.get("conversation_id")
                 if isinstance(cid, str) and cid:
                     evidence["session_id"] = cid
-                init = record.get("init")
-                if isinstance(init, dict):
-                    if isinstance(init.get("model"), str) and init["model"]:
-                        evidence["reported_model"] = init["model"]
-                    if isinstance(init.get("permission_mode"), str) and init["permission_mode"]:
-                        evidence["permission_mode"] = init["permission_mode"]
-            if event == "result":
-                result = record.get("result")
-                if isinstance(result, dict):
-                    cid = result.get("conversation_id")
-                    if isinstance(cid, str) and cid:
-                        evidence["session_id"] = cid
-                    if isinstance(result.get("status"), str) and result["status"]:
-                        evidence["result_status"] = result["status"]
-                    if isinstance(result.get("finished_reason"), str) and result["finished_reason"]:
-                        evidence["finished_reason"] = result["finished_reason"]
-                    if isinstance(result.get("error"), str) and result["error"]:
-                        evidence["error_message"] = result["error"]
-                    if isinstance(result.get("usage"), dict):
-                        evidence["usage"] = result["usage"]
-                    denied = result.get("denied_actions")
-                    if isinstance(denied, list) and denied:
-                        evidence["denied_actions"] = denied
-        return evidence
+                if isinstance(result.get("status"), str) and result["status"]:
+                    evidence["result_status"] = result["status"]
+                if isinstance(result.get("finished_reason"), str) and result["finished_reason"]:
+                    evidence["finished_reason"] = result["finished_reason"]
+                if isinstance(result.get("error"), str) and result["error"]:
+                    evidence["error_message"] = result["error"]
+                if isinstance(result.get("usage"), dict):
+                    evidence["usage"] = result["usage"]
+                denied = result.get("denied_actions")
+                if isinstance(denied, list) and denied:
+                    evidence["denied_actions"] = denied
 
+
+def _pi_evidence(records: list[dict[str, object]], evidence: dict[str, object]) -> None:
     for record in records:
         if record.get("type") == "session" and isinstance(record.get("id"), str):
             evidence["session_id"] = record["id"]
@@ -310,4 +315,12 @@ def parse_evidence(
                         evidence[target] = message[source]
         if record.get("type") == "agent_settled" and isinstance(record.get("aborted"), bool):
             evidence["settled_aborted"] = record["aborted"]
-    return evidence
+
+
+# Keyed by harness name: adds the documented fields found in the records.
+_EVIDENCE = {
+    "codex": _codex_evidence,
+    "claude": _claude_evidence,
+    "pi": _pi_evidence,
+    "agy": _agy_evidence,
+}

@@ -132,7 +132,7 @@ without `--dangerously-skip-permissions`.
 
 Codex, Pi, Claude and Antigravity CLI (`agy`) have each passed a bounded real
 file-copy probe and reuse check.
-Their raw event streams remain in each launch's `stdout.log`. The standalone
+By default their raw event streams remain in each launch's `stdout.log`. The standalone
 `parse_evidence(harness, stdout_text)` helper extracts available session and
 model fields; it does not infer the served model from the requested model.
 For Claude result records, it preserves the reported `modelUsage` mapping as
@@ -147,6 +147,20 @@ classification. A generic
 its display `name` never selects a parser. Protocol selection is part of request
 identity, so adding it to an existing request creates a different identity,
 not a continuation of the old launch allowance.
+
+### Optional raw launch logs
+
+`Run(records, workdir, retain_logs=True)` is the default. Set `retain_logs=False`
+to omit **both** `stdout.log` and `stderr.log` on new launches, including
+failed or timed-out ones. Generic command streams are discarded; when a harness
+protocol needs stdout, Workjig can spool it to a temporary file for terminal
+classification and session-ID observation. Off means *not retained*, not *never
+written to disk*. File outputs, execution outcomes, and native transcript policy
+do not change. Consumers that parse a raw log after delivery must opt to retain
+it. The setting is not work identity or allowance: replay neither relaunches a
+worker nor creates or deletes prior logs. `examples/smoke_harness.py` exposes
+`-v` / `--verbose` (default on) and `--no-verbose`; it controls file retention,
+not streaming progress to the terminal.
 
 ## Outcomes and recovery
 
@@ -231,6 +245,14 @@ fresh directory and launch allowances deliberately.
 
 ## Inspecting records
 
+Copy the manifest and its referenced `payloads/` together. For an active run,
+read or copy the manifest **first**, then its payloads: once published they are
+not replaced or collected by Workjig. `read_run()` verifies them under the
+supplied record directory and returns the original strings. Missing, invalid
+or hash-mismatched content raises `RecordError`; there is no fallback to launch
+files or to a store in the original location. Include the launch tree separately
+when retaining physical execution evidence. This format is for fresh runs.
+
 `read_run(record_dir)` returns a validated, immutable `RunView` of the
 committed `run.json` without taking the run lock, so status commands and
 audits can read while a controller works. It writes nothing and creates no
@@ -290,7 +312,7 @@ identity. No Commonplace wrapper is needed.
 
 ```python
 for launch in call.launches:
-    session = view.native_session(launch)
+    session = view.resolve_native_session(launch)
     if session.status == "located":
         audit(session.path)  # caller policy; the file can still change or disappear
     else:
@@ -301,22 +323,26 @@ for launch in call.launches:
 `unavailable` means the ID is known but there is no safely resolved file.
 `source` is `assigned` (Pi/Claude) or `observed` (Codex/Antigravity CLI) for a
 known ID.
-This checks a live pointer, not part of the frozen view: retrying lookup can
-see a new receipt or a deleted log. The reader does not start a harness,
-open the transcript, inspect stdout, search personal history, or verify
-transcript integrity. Only inspect trusted runs; a locator is not authorization
-to grant access to an external file.
+Use `view.native_session(launch)` to inspect the receipt and check any
+recorded location without starting a harness. Both methods return a
+`NativeSession` and check current files, so a repeat call can see a new
+receipt or a deleted transcript. Neither method writes to the run or takes
+its lock. Only inspect trusted runs and stores. The caller decides whether
+to open the returned path.
 
 Tracked Pi uses a fresh directory under `PI_CODING_AGENT_SESSION_DIR`
 (default: the agent's sessions root), outside the run. Claude reports its
 path via a per-launch `SessionStart` hook; disabling hooks can leave a known
 ID without a path. Workjig supplies the hook settings; combining with a
 second explicit `--settings` is not supported. Codex supplies its own ID
-in `thread.started`; a bounded app-server metadata query can supply its path.
-A crash before an event is observed can leave no ID; an early stop, ephemeral
-session, or unavailable app-server can leave an ID without a path. The controller
-observes the ID while the worker runs; it may retry a missing locator once after
-settlement. Metadata lookup never extends the worker’s execution allowance.
+in `thread.started`. The controller records that ID during execution.
+For an ID-only Codex receipt, `resolve_native_session` makes one bounded
+metadata query for the exact ID using the reader's `codex` on PATH, with
+`CODEX_HOME` set to the parent of the pinned sessions directory. The helper
+runs in a temporary working directory. The reader needs access to the
+original store and a compatible CLI. A redirected sessions directory is
+unavailable. A missing rollout, failed lookup or
+unconfirmed helper cleanup yields `unavailable` and preserves the known ID.
 Antigravity CLI (`agy`) supplies its own `conversation_id` in the `init` event,
 and its transcript path is pinned to
 `<home>/.gemini/antigravity-cli/brain/<id>/.system_generated/logs/transcript.jsonl`
@@ -333,10 +359,10 @@ lookup outside that store, into the original or copied run, or to a file named
 for a different ID. A harness using an unsupported storage layout returns
 `unavailable`; the reader does not discover a replacement by scanning.
 
-For shallow copies retain `run.json` and
+For shallow copies retain `run.json`, its sibling `payloads/` directory, and
 `launches/<launch_id>/native-session.json` when present. Keep the native
 session store where it is; copying this receipt does not copy the log.
-This feature does not change stdout retention or recovery policy.
+Native-session lookup does not require retained stdout and does not change recovery policy.
 
 ## Boundaries
 

@@ -56,7 +56,7 @@ def completed_record(tmp_path: Path):
 @pytest.mark.subprocess
 def test_launch_records_round_trip_current_storage_format(completed_record):
     path, original, state, entry, request = completed_record
-    assert state["version"] == 3
+    assert state["version"] == 4
     assert "attempts" in entry and "launches" not in entry
     with Run(path.parent, path.parent.parent) as run:
         result = run.call(request)

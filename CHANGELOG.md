@@ -6,9 +6,24 @@ so callers can update and decide whether existing run directories remain usable.
 
 ## Unreleased
 
-- Opt in to launch-bound native transcript pointers in the three harness adapters;
-  inspect them with `RunView.native_session()`. Run record version 3 records the
-  worker option. Version 2 is rejected; use a fresh run, not a migration.
+- `Run(..., retain_logs=True)` retains launch stdout and stderr by default. Set it
+  to `False` (smoke CLI: `--no-verbose`) to omit both raw logs on new launches.
+- Record format 4 retains task/input/delivered text once per distinct UTF-8 payload
+  within each run. Copy `payloads/` with `run.json`; use fresh runs rather than
+  migrating older records. The request hash and public text views are unchanged.
+- Added Antigravity CLI (`agy` 1.5.12) adapter (`agy_worker`),
+  `agy-stream-json` terminal-failure classification, `parse_evidence("agy", ...)`
+  and native session tracking (`track_native_session=True`). See
+  `docs/harness-evidence.md` for bounded probe evidence and limits.
+- Opt in to launch-bound native transcript pointers in the harness adapters
+  (Codex, Claude Code, Pi and Antigravity CLI). `RunView.native_session()`
+  inspects the recorded pointer without starting a harness.
+  `RunView.resolve_native_session()` also locates a Codex transcript, which the
+  controller no longer looks up during a launch: a Codex receipt holds only the
+  thread ID, and resolution runs the reader's `codex` with `CODEX_HOME` set to
+  the parent of the recorded sessions directory. Callers that need a Codex
+  transcript path must use the resolving method. A symlinked Codex `sessions`
+  directory is reported as unavailable. Only resolve trusted runs.
 - Named input and output strings now preserve UTF-8 file line endings on new
   launches. Replay returns the string originally committed; it cannot recover
   line endings normalized by an older runtime. Use a fresh run when exact
