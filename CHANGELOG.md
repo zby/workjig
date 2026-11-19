@@ -22,7 +22,7 @@ so callers can update and decide whether existing run directories remain usable.
   thread ID, so that call raises `UnresolvedSessionError` for it. Pass
   `resolve=True` to run the reader's `codex` with `CODEX_HOME` set to the
   parent of the recorded sessions directory. A symlinked Codex `sessions`
-  directory is reported as unavailable. Only resolve trusted runs.
+  directory cannot be resolved and is reported as unavailable. Only resolve trusted runs.
 - Named input and output strings now preserve UTF-8 file line endings on new
   launches. Replay returns the string originally committed; it cannot recover
   line endings normalized by an older runtime. Use a fresh run when exact

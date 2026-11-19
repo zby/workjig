@@ -207,21 +207,30 @@ def _capture_observed(
     extract: Callable[[dict], str | None],
     location: Callable[[str], Path | None],
 ) -> Iterator[None]:
+    """Record the session ID a worker announces; join only after settlement.
+
+    The receipt is optional evidence. No failure here, including one to start
+    the observer thread, may change the worker outcome or leave it uncommitted.
+    """
     stopped = Event()
 
     def publish(native_id: str) -> None:
-        try:
-            _session_receipt.publish(launch_dir, harness, native_id, location(native_id))
-        except OSError:
-            pass  # Optional evidence; never change the worker outcome.
+        _session_receipt.publish(launch_dir, harness, native_id, location(native_id))
 
     with ThreadPoolExecutor(max_workers=1) as pool:
-        observation = pool.submit(observe_stdout, stdout, stopped, extract, publish)
+        try:
+            observation = pool.submit(observe_stdout, stdout, stopped, extract, publish)
+        except RuntimeError:  # No thread could be started.
+            observation = None
         try:
             yield
         finally:
             stopped.set()
-        observation.result()
+        if observation is not None:
+            try:
+                observation.result()
+            except Exception:
+                pass
 
 
 def _capture_codex(

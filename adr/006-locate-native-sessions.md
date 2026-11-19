@@ -19,14 +19,16 @@ adoption of an uncertain result. A reader does not need the harness, stdout, or
 the original working directory.
 
 Pin the effective external native store in the reservation, not in the mutable
-receipt alone. Codex uses a bounded metadata-only app-server process. Antigravity
+receipt alone. Codex reports a path only through a bounded metadata-only
+app-server process, which [ADR 008](008-resolve-native-sessions-on-demand.md)
+runs for the reader, not the controller. Antigravity
 CLI needs no helper process: its `init` event supplies the canonical
 `conversation_id`, and the local transcript sits at
 `<home>/.gemini/antigravity-cli/brain/<id>/.system_generated/logs/transcript.jsonl`.
 The worker group is settled before the controller joins the observer. On POSIX a
-separate watchdog also bounds the Codex helper group if the controller
-disappears; on Windows the helper uses a kill-on-close job. Neither helper is a
-worker retry.
+separate watchdog also bounds the Codex helper group if the process that
+started it disappears; on Windows the helper uses a kill-on-close job. The
+helper is not a worker retry.
 
 The small receipt can become visible while a launch is running, independent of
 run-state transitions. The lookup is deliberately not a transactional snapshot

@@ -342,7 +342,7 @@ For an ID-only Codex receipt, `resolve=True` makes one bounded
 metadata query for the exact ID using the reader's `codex` on PATH, with
 `CODEX_HOME` set to the parent of the pinned sessions directory. The helper
 runs in a temporary working directory. The reader needs access to the
-original store and a compatible CLI. A redirected sessions directory is
+original store and a compatible CLI. With `resolve=True`, a redirected sessions directory is
 unavailable. A missing rollout, failed lookup or
 unconfirmed helper cleanup yields `unavailable` and preserves the known ID.
 Antigravity CLI (`agy`) supplies its own `conversation_id` in the `init` event,

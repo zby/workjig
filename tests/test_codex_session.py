@@ -167,3 +167,39 @@ b.lookup_codex_path({SID!r}, (sys.executable,), Path.cwd(), os.environ)
     finally:
         proc.kill()
         proc.wait(timeout=2)
+
+
+@pytest.mark.subprocess
+@pytest.mark.parametrize("failure", ["publish", "thread"])
+def test_observer_failure_does_not_change_the_worker_outcome(tmp_path, monkeypatch, failure):
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("observer failure")
+
+    if failure == "publish":
+        monkeypatch.setattr(_session_receipt, "publish", broken)
+    else:
+        monkeypatch.setattr(native_session.ThreadPoolExecutor, "submit", broken)
+    done = json.dumps({"type": "turn.completed"})
+    script = tmp_path / "exec.py"
+    script.write_text(
+        "import sys\nfrom pathlib import Path\n"
+        f"print({EVENT.decode()!r}, flush=True)\n"
+        "(Path(sys.argv[1]) / 'done').write_text('ok')\n"
+        f"print({done!r}, flush=True)\n"
+    )
+    req = Request(
+        "observed",
+        "test",
+        {},
+        ("done",),
+        CommandWorker(
+            argv=(sys.executable, str(script), "{output_dir}"),
+            track_native_session=True,
+            output_protocol="codex-json",
+        ),
+    )
+    with Run(tmp_path / "records", tmp_path) as run:
+        result = run.call(req)
+        assert result.status == "delivered"
+        assert run.unresolved_launches() == ()
+        assert run.call(req).reused

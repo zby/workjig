@@ -109,9 +109,9 @@ def _exchange(reader: BinaryIO, writer: BinaryIO, native_id: str, deadline: floa
         isinstance(path, str)
         and "\0" not in path
         and Path(path).is_absolute()
-        and len(json.dumps(path)) <= 60 * 1024  # Keep the escaped path inside the receipt limit.
+        and len(json.dumps(path)) <= 60 * 1024  # Bound what a reply can hand back.
     ):
-        path.encode("utf-8")  # Reject lone surrogates before passing to record persistence.
+        path.encode("utf-8")  # Reject lone surrogates.
         return Path(path)
     return None
 
