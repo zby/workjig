@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -21,9 +22,22 @@ from .platform import OwnershipError, resolve_command
 _REPLY_LIMIT = 256 * 1024
 _LOOKUP_SECONDS = 2.0
 
+# Reasons a lookup reports through NativeSession.reason. Unconfirmed cleanup
+# raises OwnershipError instead, which takes precedence over all of these.
+NOT_FOUND = "codex executable not found on PATH"
+NOT_STARTED = "could not start codex app-server"
+NO_ANSWER = "codex app-server did not answer in time"
+EXITED = "codex app-server exited without answering"
+TOO_LARGE = "codex app-server reply exceeded the size limit"
+ERROR_REPLY = "codex app-server returned an error"
+NO_PATH = "codex app-server reported no usable transcript path"
+
 
 def _messages(reader: BinaryIO, deadline: float) -> Iterator[dict]:
-    """Read only available bytes. Even an inherited, silent pipe has a deadline."""
+    """Read only available bytes. Even an inherited, silent pipe has a deadline.
+
+    Ending without a further message raises ValueError naming why.
+    """
     fd = reader.fileno()
     if os.name == "nt":
         import ctypes
@@ -50,7 +64,7 @@ def _messages(reader: BinaryIO, deadline: float) -> Iterator[dict]:
         size = min(remaining, _CHUNK)
         if os.name == "nt":
             if not peek(handle, None, 0, None, ctypes.byref(available), None):
-                return  # Includes broken pipe.
+                raise ValueError(EXITED)  # Includes broken pipe.
             size = min(size, available.value)
         if size:
             try:
@@ -58,34 +72,38 @@ def _messages(reader: BinaryIO, deadline: float) -> Iterator[dict]:
             except BlockingIOError:
                 chunk = None
             if chunk == b"":
-                return
+                raise ValueError(EXITED)
             if chunk:
                 remaining -= len(chunk)
                 parts = chunk.split(b"\n")
                 pending.extend(parts[0])
                 for part in parts[1:]:
                     if time.monotonic() >= deadline:
-                        return
+                        raise ValueError(NO_ANSWER)
                     yield _object(bytes(pending))
                     pending = bytearray(part)
                 continue
         time.sleep(min(0.01, max(0, deadline - time.monotonic())))
+    raise ValueError(NO_ANSWER if remaining else TOO_LARGE)
 
 
 def _reply(messages: Iterator[dict], request_id: int) -> dict:
     for message in messages:
         if type(message.get("id")) is int and message["id"] == request_id:
+            if "error" in message:
+                raise ValueError(ERROR_REPLY)
             result = message.get("result")
-            if "method" not in message and "error" not in message and isinstance(result, dict):
+            if "method" not in message and isinstance(result, dict):
                 return result
-            break
-    return {}
+            raise ValueError(NO_PATH)
+    raise ValueError(NO_ANSWER)  # Not reached: _messages raises when it ends.
 
 
-def _exchange(reader: BinaryIO, writer: BinaryIO, native_id: str, deadline: float) -> Path | None:
+def _exchange(reader: BinaryIO, writer: BinaryIO, native_id: str, deadline: float) -> Path:
     def send(message: dict) -> None:
-        writer.write(json.dumps(message).encode("ascii") + b"\n")
-        writer.flush()
+        data = json.dumps(message).encode("ascii") + b"\n"
+        while data:  # Unbuffered, so closing a broken pipe has nothing left to flush.
+            data = data[writer.write(data) :]
 
     send(
         {
@@ -95,39 +113,51 @@ def _exchange(reader: BinaryIO, writer: BinaryIO, native_id: str, deadline: floa
         }
     )
     messages = _messages(reader, deadline)
-    if not _reply(messages, 1):
-        return None
+    _reply(messages, 1)
     send({"method": "initialized", "params": {}})
     send(
         {"id": 2, "method": "thread/read", "params": {"threadId": native_id, "includeTurns": False}}
     )
     thread = _reply(messages, 2).get("thread")
-    if not isinstance(thread, dict) or thread.get("id") != native_id:
-        return None
+    if not isinstance(thread, dict):
+        raise ValueError(NO_PATH)
     path = thread.get("path")
     if (
-        isinstance(path, str)
+        thread.get("id") == native_id
+        and isinstance(path, str)
         and "\0" not in path
         and Path(path).is_absolute()
         and len(json.dumps(path)) <= 60 * 1024  # Bound what a reply can hand back.
     ):
-        path.encode("utf-8")  # Reject lone surrogates.
+        try:
+            path.encode("utf-8")  # Reject lone surrogates.
+        except UnicodeEncodeError:
+            raise ValueError(NO_PATH) from None
         return Path(path)
-    return None
+    raise ValueError(NO_PATH)
 
 
 def _pipe(files: ExitStack) -> tuple[BinaryIO, BinaryIO]:
     read, write = os.pipe()
-    return files.enter_context(os.fdopen(read, "rb")), files.enter_context(os.fdopen(write, "wb"))
+    return (
+        files.enter_context(os.fdopen(read, "rb")),
+        files.enter_context(os.fdopen(write, "wb", buffering=0)),
+    )
 
 
 def lookup_codex_path(
     native_id: str, argv: tuple[str, ...], cwd: Path, env: Mapping[str, str]
-) -> Path | None:
-    """Query one exact thread through a short-lived, separately owned stdio server."""
+) -> Path:
+    """Query one exact thread through a short-lived, separately owned stdio server.
+
+    Raises ValueError with a short reason when no path is reported, or
+    OwnershipError when the helper's stop cannot be confirmed.
+    """
     if not isinstance(native_id, str) or not _UUID.fullmatch(native_id):
-        return None
+        raise ValueError("invalid native session ID")
     command = resolve_command((argv[0], "app-server"), env)
+    if shutil.which(command[0], path=env.get("PATH")) is None:
+        raise ValueError(NOT_FOUND)  # Checked before any pipe or process exists.
     deadline = time.monotonic() + _LOOKUP_SECONDS
     with ExitStack() as files:
         stdin, writer = _pipe(files)
@@ -159,13 +189,13 @@ def lookup_codex_path(
                 )
                 files.callback(_cleanup_helper, lambda: _stop_group(proc))
         except OSError:
-            return None
+            raise ValueError(NOT_STARTED) from None
         stdin.close()
         stdout.close()
         try:
             return _exchange(reader, writer, native_id, deadline)
-        except (OSError, ValueError):
-            return None
+        except OSError:  # A write to a helper that has already gone.
+            raise ValueError(EXITED) from None
 
 
 def _cleanup_helper(cleanup: Callable[[], object]) -> None:
@@ -186,7 +216,7 @@ def _stop_group(proc: subprocess.Popen) -> None:
         raise OwnershipError(f"app-server pid {proc.pid} did not stop") from exc
 
 
-def resolve_codex_path(root: Path, native_id: str) -> Path | None:
+def resolve_codex_path(root: Path, native_id: str) -> Path:
     """Query the reader's Codex installation against the launch's pinned store."""
     if root.name != "sessions" or not root.is_dir():
         raise ValueError("pinned Codex sessions directory unavailable")

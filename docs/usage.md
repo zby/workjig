@@ -345,6 +345,25 @@ runs in a temporary working directory. The reader needs access to the
 original store and a compatible CLI. With `resolve=True`, a redirected sessions directory is
 unavailable. A missing rollout, failed lookup or
 unconfirmed helper cleanup yields `unavailable` and preserves the known ID.
+The lookup's `reason` is one of:
+
+| `reason` | Condition |
+|---|---|
+| `invalid pinned native store`, `pinned Codex sessions directory unavailable` | The recorded store cannot be queried; nothing is started |
+| `codex executable not found on PATH` | No `codex` on the reader's PATH; nothing is started |
+| `could not start codex app-server` | Starting the helper failed |
+| `codex app-server did not answer in time` | No answer within the 2-second bound |
+| `codex app-server exited without answering` | The helper exited or closed its output first |
+| `codex app-server reply exceeded the size limit` | The helper wrote more than 256 KiB without answering |
+| `codex app-server returned an error` | An error reply, for example for an unknown thread |
+| `codex app-server reported no usable transcript path` | A reply without this thread or without an absolute path |
+| `could not confirm app-server cleanup`, `app-server pid <pid> did not stop` | The helper's stop was not confirmed; reported instead of any other reason |
+
+A reported path then goes through the same store and file checks as a
+recorded location, with their reasons (such as `transcript outside the pinned
+native store or redirected`). On POSIX a `codex` that is found but cannot
+be executed reports that it exited without answering, because a watchdog
+process starts it.
 Antigravity CLI (`agy`) supplies its own `conversation_id` in the `init` event,
 and its transcript path is pinned to
 `<home>/.gemini/antigravity-cli/brain/<id>/.system_generated/logs/transcript.jsonl`

@@ -247,7 +247,7 @@ def _capture_agy(
     )
 
 
-def _resolve_codex(root: Path, native_id: str) -> Path | None:
+def _resolve_codex(root: Path, native_id: str) -> Path:
     # Imported on use: only a reader resolving a Codex launch needs the helper.
     from ._codex_session import resolve_codex_path
 
@@ -264,7 +264,8 @@ class _Harness:
     ``source`` says whether the runtime assigns the session ID before
     reservation or observes it on stdout; ``capture`` is set only for the
     latter. ``resolve`` asks the harness for a transcript path the receipt
-    lacks, and runs only when a reader requests it. ``store_under_home``
+    lacks, and runs only when a reader requests it; it raises ValueError
+    (or OwnershipError) whose message becomes the reported reason. ``store_under_home``
     marks a store that must stay a direct child of the harness home, so only
     its parent is resolved when the store is pinned.
     """
@@ -281,7 +282,7 @@ class _Harness:
         ]
         | None
     ) = None
-    resolve: Callable[[Path, str], Path | None] | None = None
+    resolve: Callable[[Path, str], Path] | None = None
     store_under_home: bool = False
 
 

@@ -6,6 +6,10 @@ so callers can update and decide whether existing run directories remain usable.
 
 ## Unreleased
 
+- Resolving a Codex launch reports a distinct `NativeSession.reason` for a
+  missing `codex`, a helper that fails to start, times out, exits, errors or
+  reports no path, instead of `no transcript location reported`. See
+  `docs/usage.md`.
 - `Run(..., retain_logs=True)` retains launch stdout and stderr by default. Set it
   to `False` (smoke CLI: `--no-verbose`) to omit both raw logs on new launches.
 - Record format 4 retains task/input/delivered text once per distinct UTF-8 payload

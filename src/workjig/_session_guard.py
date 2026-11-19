@@ -13,7 +13,11 @@ if __name__ == "__main__":
     if os.getsid(0) != group or os.getpgrp() != group:
         sys.exit(2)
     try:
-        subprocess.run(sys.argv[2:], timeout=float(sys.argv[1]), check=False)
+        helper = subprocess.Popen(sys.argv[2:])
+        # Hold no query pipe, so a helper that closes its output reads as ended.
+        os.close(0)
+        os.close(1)
+        helper.wait(timeout=float(sys.argv[1]))
     finally:
         # Also terminate inheriting children of an already-exited helper.
         # Nothing, including this private guard, needs to survive the query.
