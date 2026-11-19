@@ -326,6 +326,9 @@ class Run:
             max_launches=request.max_launches,
             retry=request.retry,
             resumed_usage_stop=approved_stop,
+            native_session_root=str(paths["native_session_root"])
+            if "native_session_root" in paths
+            else None,
         )
         return reserved, paths, argv
 

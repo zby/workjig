@@ -5,18 +5,20 @@ from __future__ import annotations
 import json
 import os
 import re
+import signal
 import stat
 import subprocess
+import sys
 import time
 from collections.abc import Callable, Iterator, Mapping
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from threading import Event
 from typing import BinaryIO
 
-from . import _windows
-from .platform import OwnedProcess, OwnershipError, cleanup_process_group, resolve_command
+from . import _session_guard, _session_receipt, _windows
+from .platform import OwnershipError, resolve_command
 
 _UUID = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}")
 _CHUNK = 64 * 1024
@@ -182,7 +184,13 @@ def lookup_codex_path(
                 files.callback(_cleanup_helper, job.cleanup)
             else:
                 proc = subprocess.Popen(
-                    command,
+                    (
+                        sys.executable,
+                        "-I",
+                        _session_guard.__file__,
+                        str(_LOOKUP_SECONDS + 1),
+                        *command,
+                    ),
                     cwd=cwd,
                     env=env,
                     stdin=stdin,
@@ -209,53 +217,53 @@ def _cleanup_helper(cleanup: Callable[[], object]) -> None:
 
 
 def _stop_group(proc: subprocess.Popen) -> None:
-    cleanup_process_group(proc)
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
     try:
         proc.wait(timeout=1)
     except subprocess.TimeoutExpired as exc:
         raise OwnershipError(f"app-server pid {proc.pid} did not stop") from exc
 
 
-def wait_for_codex(
-    process: OwnedProcess,
-    timeout: float,
-    stdout_path: Path,
-    publish: Callable[[str, Path | None], None],
-    argv: tuple[str, ...],
-    cwd: Path,
-    env: Mapping[str, str],
-) -> bool:
-    """Return the owned leader's timed wait result. The caller still settles the group.
-
-    The observer publishes the ID. After it joins, the caller thread can publish a path.
-    Timed-out workers and lingering descendants need cleanup before lookup_codex_path.
-    """
-    deadline = time.monotonic() + timeout
+@contextmanager
+def capture_codex(stdout_path: Path, argv: tuple[str, ...], cwd: Path, env: Mapping[str, str]):
+    """Observe alongside the worker; leave this context only after group cleanup."""
     stopped = Event()
 
-    def publish_pointer(native_id: str, path: Path | None) -> None:
+    def publish(native_id: str, path: Path | None) -> None:
         try:
-            publish(native_id, path)
+            _session_receipt.publish(stdout_path.parent, "codex", native_id, path)
         except OSError:
-            # Receipt storage is advisory to the worker's execution result.
-            pass
+            pass  # Optional evidence; never change the worker outcome.
 
-    # Keep the authoritative wait independent of JSON parsing and durable publication.
-    with ThreadPoolExecutor(max_workers=1) as observer:
-        observation = observer.submit(_observe, stdout_path, stopped, publish_pointer)
+    def locate(native_id: str) -> bool:
         try:
-            exited = process.wait(max(0.0, deadline - time.monotonic()))
+            path = lookup_codex_path(native_id, argv, cwd, env)
+        except OSError:
+            return False
+        if path is None:
+            return False
+        publish(native_id, path)
+        return True
+
+    def observe() -> str | None:
+        native_id = _observe(stdout_path, stopped, publish)
+        if native_id and not stopped.is_set() and locate(native_id):
+            return None
+        return native_id
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        observation = pool.submit(observe)
+        try:
+            yield
         finally:
             stopped.set()
         native_id = observation.result()
-    if exited and native_id is not None:
-        try:
-            path = lookup_codex_path(native_id, argv, cwd, env) if _group_empty(process) else None
-        except OSError:
-            path = None
-        if path is not None:
-            publish_pointer(native_id, path)
-    return exited
+    if native_id:
+        # An early thread/read can precede persistence. Try once after settlement.
+        locate(native_id)
 
 
 def _observe(
@@ -292,16 +300,3 @@ def _observe(
                     return None
             elif len(chunk) < _CHUNK:
                 stopped.wait(_POLL_SECONDS)
-
-
-def _group_empty(process: OwnedProcess) -> bool:
-    """Only spend time on metadata when there is nothing left for the caller to stop."""
-    if os.name == "nt":
-        return isinstance(process, _windows.WindowsProcess) and not process.descendants_present()
-    try:
-        os.killpg(process.pid, 0)
-    except ProcessLookupError:
-        return True
-    except PermissionError:
-        pass
-    return False

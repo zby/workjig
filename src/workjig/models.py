@@ -193,7 +193,10 @@ class CommandWorker:
             self.track_native_session and self.output_protocol is None
         ):
             raise ValueError("native session tracking requires an explicit harness protocol")
-        if self.track_native_session and self.evidence_file == "native-session.json":
+        if (
+            self.track_native_session
+            and (self.evidence_file or "").casefold() == "native-session.json"
+        ):
             raise ValueError("evidence file conflicts with native session receipt")
         object.__setattr__(self, "argv", argv)
         object.__setattr__(self, "env", MappingProxyType(env))
@@ -288,6 +291,7 @@ class LaunchRecord:
     max_launches: int = 1
     retry: RetryPolicy = field(default_factory=RetryPolicy)
     resumed_usage_stop: str | None = None
+    native_session_root: str | None = None
 
     def __post_init__(self) -> None:
         _nonempty_text(self.launch_id, "launch_id")
@@ -334,6 +338,8 @@ class LaunchRecord:
             raise ValueError("max_launches must be a positive integer")
         if not isinstance(self.retry, RetryPolicy):
             raise ValueError("retry must be a RetryPolicy")
+        if self.native_session_root is not None:
+            _nonempty_text(self.native_session_root, "native_session_root")
         if self.resumed_usage_stop is not None:
             _nonempty_text(self.resumed_usage_stop, "resumed_usage_stop")
         object.__setattr__(self, "status", status)

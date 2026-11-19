@@ -39,8 +39,8 @@ for event in terminal: print(json.dumps(event))
 @pytest.mark.subprocess
 @pytest.mark.parametrize("adapter", ["pi", "claude"])
 def test_lookup_after_timeout_retry_and_shallow_copy(tmp_path, adapter):
-    store = tmp_path / "external sessions"
-    store.mkdir()
+    store = tmp_path / "external sessions" / ("projects" if adapter == "claude" else "sessions")
+    store.mkdir(parents=True)
     script = tmp_path / "fake harness.py"
     script.write_text(FAKE)
     base = (
@@ -57,7 +57,11 @@ def test_lookup_after_timeout_retry_and_shallow_copy(tmp_path, adapter):
     worker = replace(
         base,
         argv=(sys.executable, str(script), *base.argv[1:-1], "{output_dir}"),
-        env={"PI_CODING_AGENT_SESSION_DIR": str(store), "STORE": str(store)},
+        env={
+            "PI_CODING_AGENT_SESSION_DIR": str(store),
+            "CLAUDE_CONFIG_DIR": str(store.parent),
+            "STORE": str(store),
+        },
     )
     req = Request(
         call_id="test",
@@ -92,8 +96,8 @@ def test_lookup_after_timeout_retry_and_shallow_copy(tmp_path, adapter):
 
 @pytest.mark.subprocess
 def test_codex_timeout_and_retry_resolve_distinct_native_ids(tmp_path):
-    external = tmp_path / "native"
-    external.mkdir()
+    external = tmp_path / "native" / "sessions"
+    external.mkdir(parents=True)
     script = tmp_path / "exec.py"
     script.write_text("""\
 import json, os, sys, time, uuid
@@ -122,7 +126,7 @@ print(json.dumps({'id': req['id'], 'result': {'thread': thread}}), flush=True)
     worker = replace(
         codex_worker("test", sandbox="read-only", track_native_session=True),
         argv=(sys.executable, str(script), "{output_dir}"),
-        env={"STORE": str(external)},
+        env={"STORE": str(external), "CODEX_HOME": str(external.parent)},
     )
     req = Request(
         call_id="copy",
@@ -146,9 +150,64 @@ print(json.dumps({'id': req['id'], 'result': {'thread': thread}}), flush=True)
     assert all(s.path == external / (s.session_id + ".jsonl") for s in (a, b))
     receipt = archive / "launches" / result.launches[0].launch_id / "native-session.json"
     data = json.loads(receipt.read_text())
+    # Neither a plausible name outside the reserved store, nor another thread's
+    # file within that store, is an authorized locator for A.
+    other = tmp_path / (a.session_id + ".jsonl")
+    other.touch()
+    for target in (other, b.path, view.launch_files(view.calls[0].launches[0]).prompt):
+        receipt.write_text(json.dumps({**data, "location": str(target)}))
+        invalid = view.native_session(view.calls[0].launches[0])
+        assert invalid.status == "unavailable" and invalid.session_id == a.session_id
     data["launch"] = result.launches[1].launch_id
     receipt.write_text(json.dumps(data))
     assert view.native_session(view.calls[0].launches[0]).status == "unassociated"
+
+
+@pytest.mark.unit
+def test_tracked_pi_expands_tilde_from_worker_home(tmp_path):
+    import os
+
+    from workjig.native_session import _store
+
+    worker = pi_worker(
+        "example",
+        provider="example",
+        tools=("read",),
+        project_trust="no-approve",
+        track_native_session=True,
+    )
+    home = tmp_path / "worker-home"
+    worker = replace(
+        worker,
+        env={
+            ("USERPROFILE" if os.name == "nt" else "HOME"): str(home),
+            "PI_CODING_AGENT_SESSION_DIR": "~/sessions",
+        },
+    )
+    assert _store(worker, "pi", tmp_path) == home / "sessions"
+
+
+@pytest.mark.unit
+def test_resume_last_rejected_before_reservation(tmp_path):
+    worker = CommandWorker(
+        argv=("codex", "exec", "resume", "--last", "--json", "prompt"),
+        track_native_session=True,
+        output_protocol="codex-json",
+    )
+    with Run(tmp_path / "run", tmp_path) as run, pytest.raises(ValueError, match="new thread"):
+        run.call(Request("no-resume", "task", {}, ("done",), worker))
+    assert not read_run(tmp_path / "run").calls
+
+
+@pytest.mark.unit
+def test_receipt_filename_reserved_case_insensitively():
+    with pytest.raises(ValueError, match="conflicts"):
+        CommandWorker(
+            argv=("pi",),
+            output_protocol="pi-json",
+            track_native_session=True,
+            evidence_file="Native-Session.JSON",
+        )
 
 
 @pytest.mark.unit

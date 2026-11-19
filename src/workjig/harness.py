@@ -10,7 +10,6 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
-from ._session_receipt import publish
 from .models import LaunchRecord, LaunchStatus, Request, launch_files_under
 from .native_session import bind_session
 from .outcomes import terminal_failure
@@ -58,7 +57,10 @@ def prepare(
         "launch_dir": launch_dir,
         "workdir": workdir,
     }
-    return paths, bind_session(request.worker, launch_dir, workdir, request.worker.command(paths))
+    argv, root = bind_session(request.worker, launch_dir, workdir, request.worker.command(paths))
+    if root is not None:
+        paths["native_session_root"] = root
+    return paths, argv
 
 
 def _cleanup_group(process: OwnedProcess) -> bool:
@@ -130,7 +132,6 @@ def launch(
             {},
         )
 
-    observed_id = None
     files = ExitStack()
     try:
         stdout = files.enter_context(stdout_path.open("wb"))
@@ -138,9 +139,10 @@ def launch(
     except OSError as error:
         files.close()
         return launch_error(error)
-    try:
+    with files:
         try:
-            process = start_process(resolve_command(argv, env), workdir, env, stdout, stderr)
+            command = resolve_command(argv, env)
+            process = start_process(command, workdir, env, stdout, stderr)
         except OSError as error:
             # Only a failure that left nothing running settles as launch_error.
             # An OwnershipError propagates and leaves the reservation unresolved.
@@ -153,37 +155,17 @@ def launch(
                     request.worker.track_native_session
                     and request.worker.output_protocol == "codex-json"
                 ):
-                    from ._codex_session import wait_for_codex
+                    from ._codex_session import capture_codex
 
-                    def pointer(session_id: str, path: Path | None) -> None:
-                        nonlocal observed_id
-                        observed_id = session_id
-                        publish(stdout_path.parent, "codex", session_id, path)
-
-                    timed_out = not wait_for_codex(
-                        process, request.timeout_seconds, stdout_path, pointer, argv, workdir, env
-                    )
-                else:
-                    timed_out = not process.wait(request.timeout_seconds)
+                    # Join the observer only after the worker group has been settled.
+                    files.enter_context(capture_codex(stdout_path, command, workdir, env))
+                timed_out = not process.wait(request.timeout_seconds)
             finally:
                 # Cleanup settles the whole owned group or raises, in which
                 # case the reservation stays unresolved.
                 group_lingered = _cleanup_group(process)
         finally:
             process.close()
-    finally:
-        files.close()
-
-    if observed_id is not None and (timed_out or group_lingered):
-        # The worker must be stopped before spending time on an advisory lookup.
-        from ._codex_session import lookup_codex_path
-
-        try:
-            path = lookup_codex_path(observed_id, argv, workdir, env)
-            if path is not None:
-                publish(stdout_path.parent, "codex", observed_id, path)
-        except OSError:
-            pass
 
     status = LaunchStatus.DELIVERED
     problem, invalid_problem = _read_problem(paths["problem_file"])

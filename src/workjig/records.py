@@ -99,6 +99,7 @@ def launch_to_json(record: LaunchRecord) -> dict[str, object]:
         "max_launches": record.max_launches,
         "retry": {"on": list(record.retry.on), "backoff_seconds": record.retry.backoff_seconds},
         "resumed_usage_stop": record.resumed_usage_stop,
+        "native_session_root": record.native_session_root,
     }
 
 
@@ -220,6 +221,8 @@ class CallEntry:
             raise RecordError("invalid launch order")
         required = set(self.request.required_outputs)
         for index, launch in enumerate(launches):
+            if (launch.native_session_root is not None) != self.request.worker.track_native_session:
+                raise RecordError("session store does not match worker tracking option")
             if index >= launch.max_launches:
                 raise RecordError("launch allowance exceeded in record")
             previous = launches[index - 1] if index else None

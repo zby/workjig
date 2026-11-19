@@ -17,6 +17,12 @@ or copy a transcript into a tracked run. A missing receipt cannot invalidate a
 committed execution result, nor authorize adoption of an uncertain result. A
 reader does not need the harness, stdout, or the original working directory.
 
+Pin the effective external native store in the reservation, not in the mutable
+receipt alone. Codex uses a bounded metadata-only app-server process. The
+worker group is settled before the controller joins the observer. On POSIX a
+separate watchdog also bounds the helper group if the controller disappears;
+on Windows the helper uses a kill-on-close job. Neither helper is a worker retry.
+
 The small receipt can become visible while a launch is running, independent of
 run-state transitions. The lookup is deliberately not a transactional snapshot
 of an external file. The caller owns storage permissions and retention. If a

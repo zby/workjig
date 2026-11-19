@@ -1,46 +1,23 @@
-"""Codex session association against local exec and app-server stand-ins."""
+"""Codex metadata protocol and ownership; no native install or personal sessions."""
 
 import json
 import os
+import subprocess
 import sys
 import time
-from contextlib import contextmanager
+from pathlib import Path
 
 import pytest
 
-from workjig import _codex_session as backend
-from workjig.platform import start_process
+from workjig import CommandWorker, Request, Run, _codex_session, _session_receipt, read_run
 
 SID = "01901234-abcd-7000-8000-123456789abc"
 EVENT = json.dumps({"type": "thread.started", "thread_id": SID}).encode()
-# sys.executable is the launch executable. "app-server" is a Python file in the
-# worker cwd, which exercises the fixed helper argv on both Linux and Windows.
-SERVER = """
-import json, os, sys
-from pathlib import Path
-
-def recv():
-    return json.loads(sys.stdin.buffer.readline())
-
-def emit(msg):
-    print(json.dumps(msg), flush=True)
-
-assert sys.argv == ['app-server']
-init = recv()
-assert init['method'] == 'initialize' and init['params']['clientInfo']['name'] == 'workjig'
-emit({'id': init['id'], 'result': {'userAgent': 'fake'}})
-assert recv()['method'] == 'initialized'
-req = recv()
-sid = os.environ['EXPECTED_ID']
-assert req['method'] == 'thread/read' and req['params'] == {'threadId': sid, 'includeTurns': False}
-rid = req['id']
-emit({'method': 'notification'})
-"""
 
 
 @pytest.mark.unit
-def test_only_first_complete_top_level_canonical_id():
-    events = backend._Events()
+def test_only_complete_top_level_canonical_id():
+    events = _codex_session._Events()
     for invalid in [
         b"not json",
         b"[" * 2000,
@@ -52,202 +29,130 @@ def test_only_first_complete_top_level_canonical_id():
         EVENT.replace(b"thread.started", b"item.started"),
     ]:
         assert events.feed(invalid + b"\n") is None
-    assert events.feed(b"x" * backend._CHUNK) is None
+    assert events.feed(b"x" * _codex_session._CHUNK) is None
     assert events.feed(EVENT + b"\n" + EVENT[:13]) is None
     assert events.feed(EVENT[13:]) is None
-    assert events.feed(b"\r\n" + EVENT.replace(b"abc", b"def") + b"\n") == SID
+    assert events.feed(b"\r\n") == SID
 
 
-def server(cwd, body):
-    (cwd / "app-server").write_text(SERVER + body, encoding="utf-8")
-
-
-@contextmanager
-def worker(cwd, code):
-    env = os.environ | {"EXPECTED_ID": SID}
-    argv = (sys.executable, "-c", code)
-    stdout = cwd / "stdout"
-    with stdout.open("wb") as out, (cwd / "stderr").open("wb") as err:
-        process = start_process(argv, cwd, env, out, err)
-        try:
-            yield process, stdout, argv, env
-        finally:
-            try:
-                process.cleanup()
-            finally:
-                process.close()
-
-
-@pytest.mark.subprocess
-def test_live_id_and_exact_path_on_failed_exit(tmp_path):
-    path = tmp_path / "untouched.jsonl"
-    server(
-        tmp_path,
-        f"emit({{'id': rid, 'result': {{'thread': {{'id': sid, 'path': {str(path)!r}}}}}}})",
-    )
-    raw = b"\xff\n" + EVENT + b"\n"
-    code = f"""
-import sys, time
+SERVER = """\
+import json, os, sys
 from pathlib import Path
-sys.stdout.buffer.write({raw!r})
-sys.stdout.buffer.flush()
-while not Path('published').exists(): time.sleep(.01)
-sys.stdout.buffer.write(b'tail\\x00')
-sys.exit(7)
+init = json.loads(input()); assert init['method'] == 'initialize'
+print(json.dumps({'id': init['id'], 'result': {'userAgent':'fake'}}), flush=True)
+assert json.loads(input())['method'] == 'initialized'
+req = json.loads(input()); rid = req['id']; sid = os.environ['EXPECTED_ID']
+assert req['method'] == 'thread/read' and req['params'] == {'threadId': sid, 'includeTurns': False}
 """
-    seen = []
-    with worker(tmp_path, code) as (proc, stdout, argv, env):
-
-        def publish(sid, location):
-            seen.append((sid, location))
-            if location is None:
-                assert not proc.wait(0)
-                (tmp_path / "published").touch()
-
-        assert backend.wait_for_codex(proc, 5, stdout, publish, argv, tmp_path, env)
-        assert proc.returncode == 7
-    assert seen == [(SID, None), (SID, path)]
-    assert stdout.read_bytes() == raw + b"tail\x00"
-    assert not path.exists()
 
 
 @pytest.mark.subprocess
 @pytest.mark.parametrize(
-    "response",
+    "reply",
     [
-        "{'error': {'message': 'thread not loaded'}}",
-        "{'result': {'thread': {'id': 'wrong', 'path': str(Path.cwd())}}}",
-        "{'result': {'thread': {'id': sid, 'path': '../relative'}}}",
-        "{'result': {'thread': {'id': sid, 'path': '/' + chr(0)}}}",
+        "{'error': {'message':'thread not loaded'}}",
+        "{'result': {'thread': {'id':'wrong', 'path': str(Path.cwd())}}}",
+        "{'result': {'thread': {'id':sid, 'path':'../relative'}}}",
+        "{'result': {'thread': {'id':sid, 'path':'/' + chr(0)}}}",
         "{'result': {'thread': None}}",
     ],
 )
-def test_fast_exit_advisory_metadata(tmp_path, response):
-    server(tmp_path, f"emit({{'id': rid, **{response}}})")
-    with worker(tmp_path, f"print({EVENT.decode()!r})") as (proc, stdout, argv, env):
-        assert proc.wait(5)
-        seen = []
-        assert backend.wait_for_codex(
-            proc, 5, stdout, lambda *x: seen.append(x), argv, tmp_path, env
-        )
-    assert seen == [(SID, None)]
-
-
-@pytest.mark.subprocess
-def test_timeout_with_unterminated_event(tmp_path):
-    with worker(
-        tmp_path, f"import time; print({EVENT.decode()!r}, end='', flush=True); time.sleep(30)"
-    ) as (proc, stdout, argv, env):
-        assert not backend.wait_for_codex(
-            proc, 0.25, stdout, lambda *_: pytest.fail(), argv, tmp_path, env
-        )
-        assert proc.returncode is None
-
-
-@pytest.mark.subprocess
-def test_stalled_helper_descendant_is_stopped(tmp_path, monkeypatch):
-    server(
-        tmp_path,
-        """
-import subprocess
-child = ("from pathlib import Path; import time; Path('ready').touch();"
-         "time.sleep(1.5); Path('escaped').touch()")
-subprocess.Popen([sys.executable, '-c', child])
-""",
+def test_metadata_lookup_fails_closed(tmp_path, reply):
+    (tmp_path / "app-server").write_text(
+        SERVER + f"print(json.dumps({{'id':rid, **{reply}}}), flush=True)"
     )
-    monkeypatch.setattr(backend, "_LOOKUP_SECONDS", 1)
-    env = os.environ | {"EXPECTED_ID": SID}
-    before = time.monotonic()
-    assert backend.lookup_codex_path(SID, (sys.executable, "ignored"), tmp_path, env) is None
-    assert (tmp_path / "ready").exists()
-    assert time.monotonic() - before < 3
-    time.sleep(1.6)
-    assert not (tmp_path / "escaped").exists()
-
-
-@pytest.mark.subprocess
-def test_timeout_retains_known_id_and_does_not_wait_for_helper(tmp_path):
-    server(tmp_path, "import time; time.sleep(30)")
-    with worker(
-        tmp_path, f"import time; print({EVENT.decode()!r}, flush=True); time.sleep(30)"
-    ) as (proc, stdout, argv, env):
-        seen = []
-        started = time.monotonic()
-        assert not backend.wait_for_codex(
-            proc, 0.5, stdout, lambda *p: seen.append(p), argv, tmp_path, env
+    assert (
+        _codex_session.lookup_codex_path(
+            SID, (sys.executable,), tmp_path, os.environ | {"EXPECTED_ID": SID}
         )
-        assert time.monotonic() - started < 1.5
-        assert proc.returncode is None
-        assert seen == [(SID, None)]
+        is None
+    )
 
 
 @pytest.mark.subprocess
-def test_worker_descendant_is_left_for_caller_cleanup(tmp_path):
-    server(tmp_path, "Path('looked-up').touch()")
-    code = f"""
-import subprocess, sys
-subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])
-print({EVENT.decode()!r})
-"""
-    with worker(tmp_path, code) as (proc, stdout, argv, env):
-        seen = []
-        assert backend.wait_for_codex(
-            proc, 5, stdout, lambda *p: seen.append(p), argv, tmp_path, env
-        )
-        assert seen == [(SID, None)]
-        assert proc.cleanup()
-        assert not (tmp_path / "looked-up").exists()
+def test_slow_receipt_does_not_extend_worker_lifetime(tmp_path, monkeypatch):
+    # Synchronize the worker with the receipt writer, not with interpreter startup.
+    def slow(*_):
+        (tmp_path / "observed").touch()
+        time.sleep(1.5)
 
-
-@pytest.mark.subprocess
-def test_slow_publication_cannot_turn_timeout_into_exit(tmp_path):
-    code = f"""
+    monkeypatch.setattr(_session_receipt, "publish", slow)
+    script = tmp_path / "exec.py"
+    script.write_text(f"""\
 import time
 from pathlib import Path
 print({EVENT.decode()!r}, flush=True)
-while not Path('finish').exists(): time.sleep(.01)
-"""
-    with worker(tmp_path, code) as (proc, stdout, argv, env):
-
-        def persist(sid, location):
-            assert (sid, location) == (SID, None)
-            time.sleep(0.6)
-            (tmp_path / "finish").touch()
-            # Simulate an fsync which returns after the late worker has exited.
-            time.sleep(0.2)
-
-        assert not backend.wait_for_codex(proc, 0.4, stdout, persist, argv, tmp_path, env)
-        assert proc.wait(2)
-
-
-@pytest.mark.subprocess
-def test_oversized_helper_reply_keeps_id(tmp_path):
-    server(tmp_path, "print('x' * 300000); print(json.dumps({'id': rid, 'result': {}}))")
-    with worker(tmp_path, f"print({EVENT.decode()!r})") as (proc, stdout, argv, env):
-        seen = []
-        assert backend.wait_for_codex(
-            proc, 5, stdout, lambda *p: seen.append(p), argv, tmp_path, env
-        )
-        assert seen == [(SID, None)]
-
-
-@pytest.mark.subprocess
-def test_receipt_storage_failure_preserves_worker_result(tmp_path):
-    server(
-        tmp_path, "emit({'id': rid, 'result': {'thread': {'id': sid, 'path': str(Path.cwd())}}})"
+while not Path('observed').exists(): time.sleep(.01)
+time.sleep(1)
+Path('late-effect').touch()
+""")
+    req = Request(
+        "timeout",
+        "test",
+        {},
+        ("done",),
+        CommandWorker(
+            argv=(sys.executable, str(script)),
+            track_native_session=True,
+            output_protocol="codex-json",
+        ),
+        timeout_seconds=0.75,
     )
-    seen = []
+    with Run(tmp_path / "records", tmp_path) as run:
+        assert run.call(req).status == "timeout"
+    assert (tmp_path / "observed").exists() and not (tmp_path / "late-effect").exists()
 
-    def unavailable(sid, path):
-        seen.append((sid, path))
-        raise OSError("receipt unavailable")
 
-    with worker(tmp_path, f"import sys; print({EVENT.decode()!r}); sys.exit(7)") as (
-        proc,
-        stdout,
-        argv,
-        env,
-    ):
-        assert backend.wait_for_codex(proc, 5, stdout, unavailable, argv, tmp_path, env)
-        assert proc.returncode == 7
-    assert seen == [(SID, None), (SID, tmp_path)]
+@pytest.mark.subprocess
+def test_partial_start_event_is_not_an_association(tmp_path):
+    req = Request(
+        "partial",
+        "test",
+        {},
+        ("done",),
+        CommandWorker(
+            argv=(sys.executable, "-c", f"import sys; sys.stdout.buffer.write({EVENT!r})"),
+            track_native_session=True,
+            output_protocol="codex-json",
+        ),
+    )
+    with Run(tmp_path / "run", tmp_path) as run:
+        run.call(req)
+    view = read_run(tmp_path / "run")
+    assert view.native_session(view.calls[0].launches[0]).status == "unassociated"
+
+
+@pytest.mark.subprocess
+@pytest.mark.skipif(os.name == "nt", reason="POSIX supervisor; Windows uses a kill-on-close job")
+def test_controller_death_does_not_orphan_metadata_helper(tmp_path):
+    # Both leader and child ignore a closed stdin; the child even ignores SIGTERM.
+    (tmp_path / "app-server").write_text("""\
+import os, signal, subprocess, sys, time
+from pathlib import Path
+code = ("import signal,time; from pathlib import Path;"
+        "signal.signal(signal.SIGTERM,signal.SIG_IGN);"
+        "Path('ready').touch(); time.sleep(2.5); Path('escaped').touch()")
+subprocess.Popen([sys.executable, '-c', code]); time.sleep(4)
+""")
+    probe = f"""from pathlib import Path
+import os, sys
+from workjig import _codex_session as b
+b._LOOKUP_SECONDS = .75
+b.lookup_codex_path({SID!r}, (sys.executable,), Path.cwd(), os.environ)
+"""
+    source = Path(__file__).resolve().parents[1] / "src"
+    proc = subprocess.Popen(
+        [sys.executable, "-c", probe], cwd=tmp_path, env=os.environ | {"PYTHONPATH": str(source)}
+    )
+    try:
+        end = time.monotonic() + 5
+        while not (tmp_path / "ready").exists() and time.monotonic() < end:
+            time.sleep(0.02)
+        assert (tmp_path / "ready").exists() and proc.poll() is None
+        proc.kill()
+        proc.wait(timeout=2)
+        time.sleep(2.7)
+        assert not (tmp_path / "escaped").exists()
+    finally:
+        proc.kill()
+        proc.wait(timeout=2)

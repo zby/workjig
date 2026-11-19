@@ -305,7 +305,16 @@ ID without a path. Workjig supplies the hook settings; combining with a
 second explicit `--settings` is not supported. Codex supplies its own ID
 in `thread.started`; a bounded app-server metadata query can supply its path.
 A crash before an event is observed can leave no ID; an early stop, ephemeral
-session, or unavailable app-server can leave an ID without a path.
+session, or unavailable app-server can leave an ID without a path. The controller
+observes the ID while the worker runs; it may retry a missing locator once after
+settlement. Metadata lookup never extends the worker’s execution allowance.
+
+The reservation pins the native store from the effective worker environment:
+Pi’s sessions root, `CLAUDE_CONFIG_DIR/projects`, or `CODEX_HOME/sessions`,
+with the harness defaults under the worker home. A receipt cannot redirect
+lookup outside that store, into the original or copied run, or to a file named
+for a different ID. A harness using an unsupported storage layout returns
+`unavailable`; the reader does not discover a replacement by scanning.
 
 For shallow copies retain `run.json` and
 `launches/<launch_id>/native-session.json` when present. Keep the native

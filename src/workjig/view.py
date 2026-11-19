@@ -84,8 +84,8 @@ class RunView:
 
     def native_session(self, launch: LaunchRecord) -> NativeSession:
         """Resolve only this attempt's external native transcript, without reading it."""
-        call, directory = self._launch_location(launch)
-        return locate_session(call.worker, directory)
+        call, recorded, directory = self._launch_location(launch)
+        return locate_session(call.worker, recorded, directory)
 
     def launch_files(self, launch: LaunchRecord) -> LaunchFiles:
         """Locations of a launch's files under this view's record directory.
@@ -94,16 +94,17 @@ class RunView:
         recorded ``launch_dir``, so they follow a copied or moved run. They
         are locations only: a file may not exist.
         """
-        _, directory = self._launch_location(launch)
+        _, _, directory = self._launch_location(launch)
         return launch_files_under(directory)
 
-    def _launch_location(self, launch: LaunchRecord) -> tuple[RecordedCall, Path]:
+    def _launch_location(self, launch: LaunchRecord) -> tuple[RecordedCall, LaunchRecord, Path]:
         name = launch.launch_id
         if name in {".", ".."} or Path(name).name != name or "\\" in name:
             raise ValueError(f"launch ID is not a directory name: {name!r}")
         for call in self.calls:
-            if any(recorded.launch_id == name for recorded in call.launches):
-                return call, self.record_dir / "launches" / name
+            for recorded in call.launches:
+                if recorded.launch_id == name:
+                    return call, recorded, self.record_dir / "launches" / name
         raise ValueError(f"launch is not in this run: {name!r}")
 
 
